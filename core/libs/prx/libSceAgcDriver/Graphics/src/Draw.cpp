@@ -3448,6 +3448,19 @@ bool prepareDraw(const Context& context, const State& state, const Pm4::DrawPara
                     if (binding.gpuTiling) std::memcpy(pixels.data(), binding.original.data(), binding.original.size());
                     else ReadColorTarget(color, pixels);
                 }
+            } else if (keys == DccKeys::Mixed) {
+                if (const auto mixed = MixedKeyClearRuns(color.dccAddress, colorLayout.Bytes(), color.format, color.elementBytes, color.dccAlphaOnMsb)) {
+                    if (binding.gpuTiling) {
+                        ApplyMixedKeyClear(*mixed, binding.tiled->Bytes());
+                    } else if (color.tileMode == ColorTileMode::Linear && colorLayout.Bytes() == colorLayout.LinearBytes()) {
+                        ApplyMixedKeyClear(*mixed, binding.transfer->Bytes());
+                    } else {
+                        std::vector<std::byte> tiled(colorLayout.Bytes());
+                        GuestMemory::Read(color.address, tiled, colorLayout.Alignment());
+                        ApplyMixedKeyClear(*mixed, tiled);
+                        colorLayout.Detile(tiled, binding.transfer->Bytes());
+                    }
+                }
             }
         }
         timer.phase(PhaseReadTarget);
