@@ -860,6 +860,7 @@ void encodeShaderInfo(Writer& writer, const ShaderInfo& info) {
         out.Value(image.foldTexelOffsetsOnly);
         out.Value(image.convertedSamples);
         out.Value(image.remappedDepth1D);
+        out.Value(image.gathered);
         out.Value(image.layerRowsCompatible);
         out.Value(image.layerRows);
         out.Value(image.maxArrayLayers);
@@ -977,6 +978,7 @@ void decodeShaderInfo(Reader& reader, ShaderInfo& info) {
         in.Value(image.foldTexelOffsetsOnly);
         in.Value(image.convertedSamples);
         in.Value(image.remappedDepth1D);
+        in.Value(image.gathered);
         in.Value(image.layerRowsCompatible);
         in.Value(image.layerRows);
         in.Value(image.maxArrayLayers);
@@ -1471,6 +1473,7 @@ constexpr std::string_view NeutralSwitches[] = {
     "APS5_NO_RESULT_MEMO",
     "APS5_NO_TABLE_RESOLUTION_REUSE",
     "APS5_NO_TABLE_SNAPSHOT_REUSE",
+    "APS5_RESOURCE_PLAN_MB",
     "APS5_RESULT_MEMO_MB",
 };
 
