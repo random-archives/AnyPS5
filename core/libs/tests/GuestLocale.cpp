@@ -367,6 +367,17 @@ static void CheckWideCaseTranslation() {
         Require(_Towctrans_nid_postfix(u'A', descriptor) == u'A' && _Towctrans_nid_postfix(u'7', descriptor) == u'7');
         Require(*__error_nid_postfix() == 22);
     }
+    Require(wctrans_nid_postfix("tolower") == 1 && wctrans_nid_postfix("toupper") == 2);
+    Require(towctrans_nid_postfix(u'A', wctrans_nid_postfix("tolower")) == u'a' && towctrans_nid_postfix(u'a', wctrans_nid_postfix("toupper")) == u'A');
+    Require(wctrans_nid_postfix("") == 0 && wctrans_nid_postfix("totitle") == 0 && wctrans_nid_postfix("tolowercase") == 0);
+    Require(wctrans_nid_postfix(reinterpret_cast<const char*>(0x10)) == 0);
+    const std::uint64_t alpha = wctype_nid_postfix("alpha");
+    Require(alpha != 0 && iswctype_nid_postfix(u'q', alpha) != 0 && iswctype_nid_postfix(u'7', alpha) == 0);
+    const std::uint64_t digit = wctype_nid_postfix("digit");
+    Require(digit != 0 && iswctype_nid_postfix(u'7', digit) != 0 && iswctype_nid_postfix(u'q', digit) == 0);
+    Require(wctype_nid_postfix("phonogram") == 0x200000 && wctype_nid_postfix("ideogram") == 0x80000);
+    Require(wctype_nid_postfix("") == 0 && wctype_nid_postfix("phonograms") == 0 && wctype_nid_postfix("Alpha") == 0);
+    Require(wctype_nid_postfix(reinterpret_cast<const char*>(0x10)) == 0);
 }
 
 static void CheckWideNumPutVtableObject() {
@@ -621,6 +632,16 @@ static void CheckCtypeCharConversions() {
     Require(slots->narrowRange(&facet, source + 3, source + 3, '?', nullptr) == source + 3);
 }
 
+static void CheckTimePutWideVtableObject() {
+    Require(sizeof(_ZTVSt8time_putIwSt19ostreambuf_iteratorIwSt11char_traitsIwEEE_nid_postfix) == kTimePutWideVtableSlots * sizeof(std::uintptr_t));
+    for (std::uintptr_t& slot : _ZTVSt8time_putIwSt19ostreambuf_iteratorIwSt11char_traitsIwEEE_nid_postfix) {
+        Require(slot == 0);
+        slot = 0x1111;
+        Require(slot == 0x1111);
+        slot = 0;
+    }
+}
+
 static void CheckNumPutVtableObject() {
     Require(sizeof(_ZTVSt7num_putIcSt19ostreambuf_iteratorIcSt11char_traitsIcEEE_nid_postfix) == kNumPutCharVtableSlots * sizeof(std::uintptr_t));
     for (std::uintptr_t& slot : _ZTVSt7num_putIcSt19ostreambuf_iteratorIcSt11char_traitsIcEEE_nid_postfix) {
@@ -668,6 +689,16 @@ static void CheckMoneyGetVtableObject() {
     }
 }
 
+static void CheckMoneyPutVtableObject() {
+    Require(sizeof(_ZTVSt9money_putIcSt19ostreambuf_iteratorIcSt11char_traitsIcEEE_nid_postfix) == kMoneyPutCharVtableSlots * sizeof(std::uintptr_t));
+    for (std::uintptr_t& slot : _ZTVSt9money_putIcSt19ostreambuf_iteratorIcSt11char_traitsIcEEE_nid_postfix) {
+        Require(slot == 0);
+        slot = 0x1111;
+        Require(slot == 0x1111);
+        slot = 0;
+    }
+}
+
 int main() {
     std::array<void*, 10> heapApi{};
     heapApi[0] = reinterpret_cast<void*>(&TestHeapAllocate);
@@ -705,6 +736,8 @@ int main() {
     CheckMoneyGetVtableObject();
     CheckNumpunctVtableObject();
     CheckMessagesVtableObject();
+    CheckTimePutWideVtableObject();
+    CheckMoneyPutVtableObject();
     _Locksyslock_nid_postfix();
     _Locksyslock_nid_postfix();
     _Unlocksyslock_nid_postfix();
