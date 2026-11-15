@@ -35,6 +35,15 @@ if(BUILD_TESTING)
         set_tests_properties(guest_fiber_self_rename_name_bounds PROPERTIES ENVIRONMENT_MODIFICATION
             "PATH=path_list_prepend:$<TARGET_FILE_DIR:libSceFiber>")
     endif()
+    add_test_executable(guest_fiber_getinfo_field_bounds_tests ${LIBS_INCLUDE_DIR}/tests/GuestFiberGetInfoFieldBounds.cpp)
+    target_include_directories(guest_fiber_getinfo_field_bounds_tests PRIVATE ${LIBS_INCLUDE_DIR})
+    target_link_libraries(guest_fiber_getinfo_field_bounds_tests PRIVATE libSceFiber libc)
+    configure_windows_unwind(guest_fiber_getinfo_field_bounds_tests)
+    add_test(NAME guest_fiber_getinfo_field_bounds COMMAND guest_fiber_getinfo_field_bounds_tests)
+    if(WIN32)
+        set_tests_properties(guest_fiber_getinfo_field_bounds PROPERTIES ENVIRONMENT_MODIFICATION
+            "PATH=path_list_prepend:$<TARGET_FILE_DIR:libSceFiber>")
+    endif()
 endif()
 
 
