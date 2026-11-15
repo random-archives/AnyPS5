@@ -1,4 +1,5 @@
 #include "prx/libc/include/Api.hpp"
+#include "prx/libkernel/File/include/File.hpp"
 #include "prx/libkernel/KernelErrors.hpp"
 #include "prx/libkernel/include/Api.hpp"
 #include "SceTypes.hpp"
@@ -182,7 +183,7 @@ void TestClosedReadEndEpipeAndSigpipe() {
     Require(_write_nid_postfix(fds[1], sample, sizeof(sample)) == -1);
     Require(*__error_nid_postfix() == PosixEpipe);
 
-    Require(write(fds[1], sample, sizeof(sample)) == SCE_KERNEL_ERROR_EPIPE);
+    Require(sceKernelWrite(fds[1], sample, sizeof(sample)) == SCE_KERNEL_ERROR_EPIPE);
 
     signal_nid_postfix(PosixSigpipe, HandleSigpipe);
     const auto signalsBefore = gBrokenPipeSignals;
@@ -238,8 +239,8 @@ void TestClosedDescriptorOperations() {
     Require(write_nid_postfix(fds[1], buf, sizeof(buf)) == -1);
     Require(*__error_nid_postfix() == PosixEbadf);
 
-    Require(read(fds[0], buf, sizeof(buf)) == SCE_KERNEL_ERROR_EBADF);
-    Require(write(fds[1], buf, sizeof(buf)) == SCE_KERNEL_ERROR_EBADF);
+    Require(sceKernelRead(fds[0], buf, sizeof(buf)) == SCE_KERNEL_ERROR_EBADF);
+    Require(sceKernelWrite(fds[1], buf, sizeof(buf)) == SCE_KERNEL_ERROR_EBADF);
 }
 
 } // namespace
