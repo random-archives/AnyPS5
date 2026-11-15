@@ -4382,7 +4382,7 @@ std::uint64_t StorageTexture::writeBackWindows(std::span<const ImportSegment> se
         recorder->MarkCovered(storedAccess);
         // Only the pieces written into the import are stores a CPU reader must wait for; the
         // shadowed ones reach it through a publish, which notes its own.
-        if (!imported.empty()) recorder->NotePendingWrites(imported);
+        if (!imported.empty()) recorder->NoteStampedWrites(imported);
     }
     partialWriteBacks.fetch_add(1, std::memory_order_relaxed);
     partialWriteBackBytes.fetch_add(storedBytes, std::memory_order_relaxed);
@@ -5105,6 +5105,7 @@ bool StorageTexture::FlushPending(std::uint64_t address, std::size_t bytes, cons
         if (!flush.empty()) BumpPendingSerial();
         for (const auto& texture : flush) {
             if (texture->drawnListed) ownNotes.insert(ownNotes.end(), texture->storeNotes.begin(), texture->storeNotes.end());
+            ownNotes.insert(ownNotes.end(), texture->flushNotes.begin(), texture->flushNotes.end());
         }
     }
     if (flush.empty()) {
@@ -5207,6 +5208,8 @@ bool StorageTexture::FlushPending(std::uint64_t address, std::size_t bytes, cons
         }
     }
     if (const auto hook = flushingHookForTest.load(std::memory_order_acquire)) hook();
+    const auto* noting = Recorder::Active();
+    const auto firstNote = noting != nullptr ? noting->WriteNoteCount() : 0;
     std::exception_ptr failure;
     const auto previousReason = std::exchange(flushReason, reason);
     for (const auto& texture : flush) {
@@ -5226,6 +5229,15 @@ bool StorageTexture::FlushPending(std::uint64_t address, std::size_t bytes, cons
         const auto units = PublishShadow(address, bytes, scope, PublishReasonFor(reason), waited);
         if (units != 0) waitForIdlePublish(reason);
         if (published != nullptr) *published = units != 0;
+    }
+    if (flush.size() == 1 && noting != nullptr && noting == Recorder::Active()) {
+        if (const auto notes = noting->StampedNotesSince(firstNote); !notes.empty()) {
+            auto& pending = Pending();
+            std::lock_guard lock(pending.mutex);
+            auto& own = flush.front()->flushNotes;
+            own.insert(own.end(), notes.begin(), notes.end());
+            if (own.size() > 32) own.erase(own.begin(), own.end() - 32);
+        }
     }
     return true;
 }
@@ -7596,7 +7608,8 @@ void StorageTexture::writeBackLayers(const std::vector<bool>& layers) {
         } else {
             recorder->EndGpuTiming(timing, storedBytes);
             recorder->MarkShaderReadsCovered();
-            recorder->NotePendingWrite(firstStored, static_cast<std::size_t>(lastStored - firstStored));
+            const std::array stamped{std::pair{firstStored, lastStored}};
+            recorder->NoteStampedWrites(stamped);
             if (drawn.drawn) noteStore(recorder->LastWriteNote(firstStored, static_cast<std::size_t>(lastStored - firstStored)));
         }
         countStorageWriteBack(storedBytes, true, drawn.drawn);
