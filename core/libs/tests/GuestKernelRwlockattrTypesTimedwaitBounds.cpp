@@ -1,5 +1,6 @@
 #include "prx/libc/include/Api.hpp"
 #include "prx/libkernel/include/Api.hpp"
+#include "prx/libkernel/Pthread/include/Rwlock.hpp"
 #include <atomic>
 #include <chrono>
 #include <cstdint>
