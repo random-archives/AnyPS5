@@ -1563,6 +1563,8 @@ static std::optional<StorageTexture::OverwriteClaim> OverwriteClaimFor(std::span
     auto written = WrittenStorageBytes(resource, mip);
     if (written.bytes.empty() || OverwriteAliased(shaders, binding, element, written.bytes)) return std::nullopt;
     return StorageTexture::OverwriteClaim{resource.baseAddress, resource.width, resource.height, std::move(written.bytes)};
+}
+
 static void claimStoredMultisampleMemory(const Context& context, const GuestTextureResource& resource, std::uint64_t guestBytes, std::uint32_t mip) {
     if (!MultisampleColorTargetOverlaps(resource.baseAddress, guestBytes)) return;
     for (const auto& [begin, end] : WrittenStorageBytes(ArrayLayerWindow(resource, context.limits.maxImageArrayLayers), mip).bytes) ClaimMultisampleTargetStore(begin, end - begin);
