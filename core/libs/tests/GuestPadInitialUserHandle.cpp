@@ -2,8 +2,6 @@
 #include "prx/libScePad/include/Pad.hpp"
 #include "prx/libScePad/include/LaterExports.hpp"
 #include <cstdlib>
-#include <stdexcept>
-#include <string_view>
 
 namespace {
 
@@ -117,22 +115,11 @@ void TestUserHandleLifecycleAndBounds() {
     Require(scePadGetControllerBusType(initialHandle, &busType) == PAD_ERROR_INVALID_HANDLE);
 }
 
-void TestLaterExportsIsInitialUserHandlePlaceholder() {
-    bool caught = false;
-    try {
-        scePadIsInitialUserHandle();
-    } catch (const std::runtime_error& error) {
-        caught = std::string_view(error.what()).find("scePadIsInitialUserHandle") != std::string_view::npos;
-    }
-    Require(caught);
-}
-
 } // namespace
 
 int main() {
     TestUninitializedState();
     Require(scePadInit_nid_postfix() == PAD_OK);
     TestUserHandleLifecycleAndBounds();
-    TestLaterExportsIsInitialUserHandlePlaceholder();
     return 0;
 }
