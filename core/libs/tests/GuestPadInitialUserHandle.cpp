@@ -2,6 +2,7 @@
 #include "prx/libScePad/include/Pad.hpp"
 #include "prx/libScePad/include/LaterExports.hpp"
 #include <cstdlib>
+#include <initializer_list>
 
 namespace {
 
