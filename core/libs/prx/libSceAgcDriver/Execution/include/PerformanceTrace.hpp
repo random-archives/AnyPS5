@@ -910,7 +910,7 @@ public:
     static void GpuRange(const char* name, double beginNs, double endNs, std::uint64_t batch = 0) {
         if (!buffering.load(std::memory_order_relaxed)) return;
         std::lock_guard lock(gpuMutex);
-        if (gpuRanges.size() == gpuRanges.capacity()) {
+        if (gpuRanges.size() >= gpuCapacity) {
             ++gpuLost;
             return;
         }
@@ -961,6 +961,7 @@ private:
     static std::atomic<TraceThread* (*)()> binder;
     inline static std::mutex gpuMutex;
     inline static std::vector<TraceGpuRange> gpuRanges;
+    inline static std::size_t gpuCapacity = TraceThread::DefaultCapacity;
     inline static std::uint64_t gpuLost = 0;
 };
 
