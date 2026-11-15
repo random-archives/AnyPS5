@@ -4,6 +4,7 @@
 #include "zlib.h"
 #include <algorithm>
 #include <chrono>
+#include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
@@ -48,7 +49,11 @@ int Run(int argc, char** argv) {
     std::filesystem::create_directories(directory);
     const auto utf8 = directory.u8string();
     const std::string path(utf8.begin(), utf8.end());
+#ifdef _WIN32
+    Check(_wputenv_s(L"APS5_TRACE_DIR", directory.c_str()) == 0, "could not set the GPU trace directory");
+#else
     Check(SDL_setenv("APS5_TRACE_DIR", path.c_str(), 1) == 0, "could not set the GPU trace directory");
+#endif
     auto device = OpenVulkanTestDevice();
     if (!device) {
         std::filesystem::remove_all(directory);
