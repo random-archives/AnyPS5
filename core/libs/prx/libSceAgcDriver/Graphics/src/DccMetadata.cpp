@@ -804,14 +804,20 @@ std::optional<MixedKeyClear> MixedKeyClearRuns(std::uint64_t metaAddress, std::u
 
 void ApplyMixedKeyClear(const MixedKeyClear& clear, std::span<std::byte> dst, std::uint64_t sliceByteOffset) {
     const auto sliceEnd = sliceByteOffset + dst.size();
+    constexpr std::size_t chunk = 4096;
+    std::array<std::byte, chunk + sizeof(clear.pattern)> fill;
+    for (std::size_t i = 0; i < fill.size(); i += sizeof(clear.pattern)) std::memcpy(fill.data() + i, &clear.pattern, sizeof(clear.pattern));
     for (const auto& [first, last] : clear.runs) {
         const auto runBegin = static_cast<std::uint64_t>(first) * KeyBytes;
         const auto runEnd = static_cast<std::uint64_t>(last) * KeyBytes;
         if (runEnd <= sliceByteOffset || runBegin >= sliceEnd) continue;
         const auto clampedBegin = static_cast<std::size_t>(std::max(runBegin, sliceByteOffset) - sliceByteOffset);
         const auto clampedEnd = static_cast<std::size_t>(std::min(runEnd, sliceEnd) - sliceByteOffset);
-        for (auto pos = clampedBegin; pos < clampedEnd; pos += sizeof(clear.pattern)) {
-            std::memcpy(dst.data() + pos, &clear.pattern, std::min<std::size_t>(sizeof(clear.pattern), clampedEnd - pos));
+        const auto phase = static_cast<std::size_t>((sliceByteOffset + clampedBegin) % sizeof(clear.pattern));
+        for (auto pos = clampedBegin; pos < clampedEnd;) {
+            const auto size = std::min(chunk, clampedEnd - pos);
+            std::memcpy(dst.data() + pos, fill.data() + phase, size);
+            pos += size;
         }
     }
 }
