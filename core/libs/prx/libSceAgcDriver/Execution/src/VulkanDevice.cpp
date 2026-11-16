@@ -1215,6 +1215,7 @@ struct VulkanDevice::State {
             Graphics::ClearUploadCopies(device);
             Graphics::ClearImageMirrors(device);
             Graphics::ClearHostImports(device);
+            Graphics::ClearResidentRanges(device);
             patternBuffers.clear();
             repeatedFills.clear();
             workgroupMemory.reset();
