@@ -877,5 +877,10 @@ class GitFailureAndExitTests(unittest.TestCase):
         self.assertTrue(stderr.getvalue().strip())
 
 
+class RecipeFieldTests(unittest.TestCase):
+    def test_unique_recipe_fields_keeps_distinct_names(self):
+        self.assertEqual(performance_bisect.unique_recipe_fields([('a', 1), ('b', 2)]), {'a': 1, 'b': 2})
+
+
 if __name__ == "__main__":
     unittest.main()
