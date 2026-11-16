@@ -591,14 +591,6 @@ DccKeyState textureClearKeyState(const GuestTextureResource& resource, std::uint
     DccKeys keys;
     if (const auto known = WaitForKeyWriters(resource, guestBytes)) keys = *known;
     else keys = currentDccKeys(resource.dccAddress, DccKeyBytes(guestBytes), memoized);
-    if (keys == DccKeys::Mixed && memoized && MixedKeyClearEnabled() && GuestMemory::GpuMutex().HeldByThisThread()) {
-        const auto count = DccKeyBytes(guestBytes);
-        if (auto* recorder = Recorder::Active(); recorder != nullptr && count != 0 && recorder->PendingWriteOverlaps(resource.dccAddress, count)) {
-            Recorder::CountSync(2);
-            recorder->SyncThrough(resource.dccAddress, count);
-            keys = readDccKeys(resource.dccAddress, count, memoized);
-        }
-    }
     if (keys == DccKeys::Mixed && MixedKeyClearEnabled()) {
         if (memoized) return {};
         if (const auto mixed = MixedKeyClearRuns(resource, guestBytes)) return {DccKeys::Uncompressed, mixed->signature};
@@ -990,7 +982,7 @@ bool PendingFillsLeaveUncompressed(const Recorder& recorder, const GuestTextureR
     const auto begin = resource.dccAddress;
     if (!GuestMemory::Accessible(reinterpret_cast<const void*>(begin), count) || AnyShadowedOverlaps(begin, count)) return false;
     const auto landed = KeysAfterPendingWrites(recorder, begin, count);
-    return (!MixedKeyClearEnabled() && landed.mixed) || (landed.value >= 0 && EncodedKeys(resource, ByteKeys(static_cast<std::uint8_t>(landed.value))) == DccKeys::Uncompressed);
+    return landed.mixed || (landed.value >= 0 && EncodedKeys(resource, ByteKeys(static_cast<std::uint8_t>(landed.value))) == DccKeys::Uncompressed);
 }
 
 }
