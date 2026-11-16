@@ -717,11 +717,6 @@ int APS5_VABI _FErfc_nid_postfix() {
     return 0;
 }
 
-int APS5_VABI _FHypot_nid_postfix() {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
-}
-
 int APS5_VABI _FLogpoly_nid_postfix() {
     NotImplemented_nid_no_patch(__func__);
     return 0;
@@ -893,11 +888,6 @@ int APS5_VABI _Getzone_nid_postfix() {
     return 0;
 }
 
-int APS5_VABI _Hypot_nid_postfix() {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
-}
-
 int APS5_VABI _Isdst_nid_postfix() {
     return -1;
 }
@@ -908,11 +898,6 @@ int APS5_VABI _LAtan_nid_postfix() {
 }
 
 int APS5_VABI _LErfc_nid_postfix() {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
-}
-
-int APS5_VABI _LHypot_nid_postfix() {
     NotImplemented_nid_no_patch(__func__);
     return 0;
 }
