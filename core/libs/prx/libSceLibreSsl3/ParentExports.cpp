@@ -208,8 +208,6 @@ __asm__(APS5_ASM_FUNCTION("RSA_sign") "jmp *__imp_RSA_sign_nid_postfix(%rip)\n")
 
 __asm__(APS5_ASM_FUNCTION("ENGINE_cleanup") "jmp *__imp_ENGINE_cleanup_nid_postfix(%rip)\n");
 
-__asm__(APS5_ASM_FUNCTION("EVP_DecryptUpdate") "jmp *__imp_EVP_DecryptUpdate_nid_postfix(%rip)\n");
-
 __asm__(APS5_ASM_FUNCTION("ECDSA_verify") "jmp *__imp_ECDSA_verify_nid_postfix(%rip)\n");
 
 __asm__(APS5_ASM_FUNCTION("i2d_X509_PUBKEY") "jmp *__imp_i2d_X509_PUBKEY_nid_postfix(%rip)\n");
@@ -277,8 +275,6 @@ __asm__(APS5_ASM_FUNCTION("SSL_CTX_set1_groups_list") "jmp *__imp_SSL_CTX_set1_g
 __asm__(APS5_ASM_FUNCTION("SSL_CIPHER_get_version") "jmp *__imp_SSL_CIPHER_get_version_nid_postfix(%rip)\n");
 
 __asm__(APS5_ASM_FUNCTION("SSL_get0_param") "jmp *__imp_SSL_get0_param_nid_postfix(%rip)\n");
-
-__asm__(APS5_ASM_FUNCTION("EVP_EncryptUpdate") "jmp *__imp_EVP_EncryptUpdate_nid_postfix(%rip)\n");
 
 __asm__(APS5_ASM_FUNCTION("X509_VERIFY_PARAM_set1_ip_asc") "jmp *__imp_X509_VERIFY_PARAM_set1_ip_asc_nid_postfix(%rip)\n");
 
@@ -749,11 +745,7 @@ __asm__(APS5_ASM_FUNCTION("X509_get_pubkey") "jmp *__imp_X509_get_pubkey_nid_pos
 
 __asm__(APS5_ASM_FUNCTION("X509_STORE_add_cert") "jmp *__imp_X509_STORE_add_cert_nid_postfix(%rip)\n");
 
-__asm__(APS5_ASM_FUNCTION("PEM_read_bio_PrivateKey") "jmp *__imp_PEM_read_bio_PrivateKey_nid_postfix(%rip)\n");
-
 __asm__(APS5_ASM_FUNCTION("X509_EXTENSION_get_critical") "jmp *__imp_X509_EXTENSION_get_critical_nid_postfix(%rip)\n");
-
-__asm__(APS5_ASM_FUNCTION("EVP_CipherUpdate") "jmp *__imp_EVP_CipherUpdate_nid_postfix(%rip)\n");
 
 __asm__(APS5_ASM_FUNCTION("SSL_CTX_use_PrivateKey_file") "jmp *__imp_SSL_CTX_use_PrivateKey_file_nid_postfix(%rip)\n");
 
@@ -787,5 +779,11 @@ __asm__(APS5_ASM_FUNCTION("PEM_X509_INFO_read_bio") "jmp *__imp_PEM_X509_INFO_re
 __asm__(APS5_ASM_FUNCTION("RSA_private_decrypt") "jmp *__imp_RSA_private_decrypt_nid_postfix(%rip)\n");
 
 __asm__(APS5_ASM_FUNCTION("DTLSv1_server_method") "jmp *__imp_DTLSv1_server_method_nid_postfix(%rip)\n");
+
+__asm__(APS5_ASM_FUNCTION("EVP_aes_128_wrap") "jmp *__imp_EVP_aes_128_wrap_nid_postfix(%rip)\n");
+
+__asm__(APS5_ASM_FUNCTION("EVP_aes_192_wrap") "jmp *__imp_EVP_aes_192_wrap_nid_postfix(%rip)\n");
+
+__asm__(APS5_ASM_FUNCTION("EVP_aes_256_wrap") "jmp *__imp_EVP_aes_256_wrap_nid_postfix(%rip)\n");
 
 }
