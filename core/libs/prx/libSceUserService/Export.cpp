@@ -415,6 +415,9 @@ int APS5_VABI sceUserServiceGetGamePresets(int user_id, UserServiceGamePresets* 
 }
 
 int APS5_VABI sceUserServiceGetInitialUser(int* user_id) {
+ if (!initialized.load()) {
+  return USER_SERVICE_ERROR_NOT_INITIALIZED;
+ }
  if (user_id == nullptr) {
   return USER_SERVICE_ERROR_INVALID_ARGUMENT;
  }
@@ -454,6 +457,9 @@ int APS5_VABI sceUserServiceGetLoginUserIdList(UserServiceLoginUserIdList* user_
 }
 
 int APS5_VABI sceUserServiceGetUserName(int user_id, char* name, size_t size) {
+ if (!initialized.load()) {
+  return USER_SERVICE_ERROR_NOT_INITIALIZED;
+ }
  if (name == nullptr) {
   return USER_SERVICE_ERROR_INVALID_ARGUMENT;
  }
