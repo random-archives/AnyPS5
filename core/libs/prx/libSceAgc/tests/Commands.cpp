@@ -91,9 +91,9 @@ bool APS5_VABI growReserved(CommandBuffer* buffer, std::uint32_t count, void* us
 
 void testPackets() {
     Storage storage;
-    sceAgcDcbResetQueue(&storage.buffer, 0, 3);
+    sceAgcDcbResetQueue(&storage.buffer, 0, 0);
     sceAgcDcbDrawIndexAuto(&storage.buffer, 17, 0);
-    const std::array<std::uint32_t, 5> expected{0xc0001200u, 3, 0xc0012d00u, 17, 2};
+    const std::array<std::uint32_t, 11> expected{0xffff1000u, 0xc0027904u, 0x342u, 0xce200000u, 0u, 0xc0017904u, 0x342u, 0xcea00000u, 0xc0012d00u, 17u, 2u};
     check(std::equal(expected.begin(), expected.end(), storage.words.begin()), "reset or draw packet mismatch");
     check(storage.buffer.cursor_up == storage.words.data() + expected.size(), "incorrect packet cursor advance");
     const auto before = storage.words;

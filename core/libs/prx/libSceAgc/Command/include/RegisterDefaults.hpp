@@ -20,6 +20,10 @@ struct QueueResetState {
     std::uint32_t version;
     bool external;
     std::span<const std::uint32_t> commands;
+    std::span<const ShaderRegister> context;
+    std::span<const ShaderRegister> shader;
+    std::span<const ShaderRegister> userConfig;
+    std::uint32_t counterRegisters;
 };
 
 QueueResetState GetQueueResetState(std::uint32_t instance, bool active);

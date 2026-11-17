@@ -64,6 +64,9 @@ struct DefaultContext {
     std::uint32_t version = 0;
     bool external = false;
     std::vector<std::uint32_t> resetCommands;
+    std::vector<ShaderRegister> shaderRegisters;
+    std::vector<ShaderRegister> userConfigRegisters;
+    std::uint32_t counterRegisters = 0;
 };
 
 std::mutex defaultStateMutex;
@@ -170,6 +173,33 @@ int InitializeDefaultCxState(std::uint32_t version) {
         begin = end;
     }
     if (next.resetCommands.size() * sizeof(std::uint32_t) >= 0x180u) return static_cast<int>(0x8a6c0001u);
+    const auto* publicDefaults = static_cast<const RegisterDefaults*>(GetRegisterDefaults(version, false, __func__));
+    const auto* internalDefaults = static_cast<const RegisterDefaults*>(GetRegisterDefaults(version, true, __func__));
+    for (const auto* source : {publicDefaults, internalDefaults}) {
+        for (std::size_t bank = 1; bank <= 2; ++bank) {
+            if (source->registerCounts[bank] == 0) continue;
+            Require(source->tables[bank] != nullptr && source->tables[bank][0] != nullptr, __func__, "missing register defaults bank");
+            auto& registers = bank == 1 ? next.shaderRegisters : next.userConfigRegisters;
+            registers.insert(registers.end(), source->tables[bank][0], source->tables[bank][0] + source->registerCounts[bank]);
+        }
+    }
+    const auto* types = static_cast<const std::uint32_t*>(publicDefaults->types);
+    for (std::uint32_t i = 0; i < publicDefaults->count; ++i) {
+        if (types[i * 3] != 0x4cc673a0u) continue;
+        const auto index = types[i * 3 + 1] & 0x3ffu;
+        const auto* first = publicDefaults->tables[index & 3u][index >> 2u];
+        const auto found = std::find_if(next.userConfigRegisters.begin(), next.userConfigRegisters.end(), [&](const auto& entry) { return entry.offset == first->offset; });
+        if (found == next.userConfigRegisters.end()) break;
+        const auto begin = static_cast<std::size_t>(found - next.userConfigRegisters.begin());
+        Require(next.userConfigRegisters.size() - begin >= 8, __func__, "short counter register defaults group");
+        next.counterRegisters = 8;
+        for (std::size_t j = 0; j < 8; ++j) std::swap(next.userConfigRegisters[begin + j], next.userConfigRegisters[next.userConfigRegisters.size() - 1 - j]);
+        break;
+    }
+    const auto byOffset = [](const auto& left, const auto& right) { return left.offset < right.offset; };
+    std::sort(next.shaderRegisters.begin(), next.shaderRegisters.end(), byOffset);
+    std::sort(next.userConfigRegisters.begin(), next.userConfigRegisters.end() - next.counterRegisters, byOffset);
+    Require(next.count < 0x4000 && next.shaderRegisters.size() < 0x4000 && next.userConfigRegisters.size() < 0x4000, __func__, "register defaults exceed an indexed load");
     next.version = version;
     next.external = true;
     activeDefaultInstance = static_cast<std::uint32_t>(slot - defaultContexts.begin());
@@ -186,7 +216,9 @@ QueueResetState GetQueueResetState(std::uint32_t instance, bool active) {
     }
     Require(instance < defaultContexts.size(), __func__, "invalid context defaults instance");
     const auto& context = defaultContexts[instance];
-    return {instance, context.version, context.external, context.resetCommands};
+    return {instance, context.version, context.external, context.resetCommands,
+            context.count == 0 ? std::span<const ShaderRegister>{} : std::span<const ShaderRegister>{context.registers.data(), context.count},
+            context.shaderRegisters, context.userConfigRegisters, context.counterRegisters};
 }
 
 int CopyDefaultCxStateRange(void* destination, std::uint32_t first, std::uint32_t last, std::span<const ShaderRegister> registers) {
