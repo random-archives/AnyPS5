@@ -54,6 +54,7 @@ void APS5_VABI _ZN7WebCore5ColorC1EOS0_(WebCore::Color* self, WebCore::Color&& o
     if (WebCore::IsOutOfLine(source)) {
         throw std::invalid_argument("OutOfLine Color unsupported");
     }
+    if (!GuestWritable_nid_no_patch(&other, sizeof(other))) NotImplementedAt_nid_no_patch(__func__, __FILE__, __LINE__);
     if (!GuestCopyOut_nid_no_patch(self, &source, sizeof(source))) NotImplementedAt_nid_no_patch(__func__, __FILE__, __LINE__);
     const WebCore::Color moved{};
     if (!GuestCopyOut_nid_no_patch(&other, &moved, sizeof(moved))) NotImplementedAt_nid_no_patch(__func__, __FILE__, __LINE__);
@@ -65,6 +66,7 @@ void APS5_VABI _ZN7WebCore5ColorC2EOS0_(WebCore::Color* self, WebCore::Color&& o
     if (WebCore::IsOutOfLine(source)) {
         throw std::invalid_argument("OutOfLine Color unsupported");
     }
+    if (!GuestWritable_nid_no_patch(&other, sizeof(other))) NotImplementedAt_nid_no_patch(__func__, __FILE__, __LINE__);
     if (!GuestCopyOut_nid_no_patch(self, &source, sizeof(source))) NotImplementedAt_nid_no_patch(__func__, __FILE__, __LINE__);
     const WebCore::Color moved{};
     if (!GuestCopyOut_nid_no_patch(&other, &moved, sizeof(moved))) NotImplementedAt_nid_no_patch(__func__, __FILE__, __LINE__);
@@ -96,6 +98,7 @@ WebCore::Color* APS5_VABI _ZN7WebCore5ColoraSEOS0_(WebCore::Color* self, WebCore
     if (WebCore::IsOutOfLine(target) || WebCore::IsOutOfLine(source)) {
         throw std::invalid_argument("OutOfLine Color unsupported");
     }
+    if (!GuestWritable_nid_no_patch(&other, sizeof(other))) NotImplementedAt_nid_no_patch(__func__, __FILE__, __LINE__);
     if (!GuestCopyOut_nid_no_patch(self, &source, sizeof(source))) NotImplementedAt_nid_no_patch(__func__, __FILE__, __LINE__);
     const WebCore::Color moved{};
     if (!GuestCopyOut_nid_no_patch(&other, &moved, sizeof(moved))) NotImplementedAt_nid_no_patch(__func__, __FILE__, __LINE__);
