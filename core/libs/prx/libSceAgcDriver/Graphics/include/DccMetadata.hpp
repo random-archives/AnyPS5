@@ -75,6 +75,7 @@ struct DccKeyState {
 };
 DccKeys TextureClearKeys(const GuestTextureResource& resource, std::uint64_t guestBytes);
 DccKeyState TextureClearKeyState(const GuestTextureResource& resource, std::uint64_t guestBytes);
+DccKeys ScannedDccKeys(std::uint64_t metaAddress, std::size_t keyCount);
 // The last stable key scan of one surface's metadata (ProvedClearKeys): the keys read and the write
 // generation the key range was collected at before the scan. Held by the image or texture of the
 // surface, read and written under GuestMemory::GpuMutex only.
