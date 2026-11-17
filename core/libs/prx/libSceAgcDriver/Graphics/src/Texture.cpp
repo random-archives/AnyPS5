@@ -5,6 +5,7 @@
 #include "prx/libSceAgcDriver/Execution/include/Driver/Draw/DrawPipeline.hpp"
 #include "prx/libSceAgcDriver/Graphics/include/RuntimeSwitches.hpp"
 #include "prx/libSceAgcDriver/Graphics/include/Texture.hpp"
+#include "prx/libSceAgcDriver/Graphics/include/MultisampleTarget.hpp"
 #include "prx/libSceAgcDriver/Graphics/include/DepthSurface.hpp"
 #include "prx/libSceAgcDriver/Graphics/include/RuntimeSwitches.hpp"
 #include "prx/libSceAgcDriver/Graphics/include/SlimMutex.hpp"
@@ -1760,11 +1761,18 @@ VkFormat AttachmentProxyFormat(const Context& context, VkFormat format) {
     return proxy;
 }
 
+static std::atomic<bool>& storageTexturesCreated() {
+    static std::atomic<bool> created{false};
+    return created;
+}
+
 std::shared_ptr<StorageTexture> StorageTexture::Create(const Context& context, TextureDetiler& detiler, const GuestTextureResource& descriptor, std::uint32_t mipLevel) {
     static const bool profile = std::getenv("APS5_PROFILE_DRAW") != nullptr;
     PhaseTimer timer;
     static const bool unwatchHooked = [] {
         GuestMemory::SetUnwatchHook(&StorageTexture::SaveBeforeUnwatch);
+        storageTexturesCreated().store(true, std::memory_order_release);
+        UpdateResidentImageUnmapObserver_nid_no_patch();
         return true;
     }();
     static_cast<void>(unwatchHooked);
@@ -1829,6 +1837,7 @@ StorageTexture::StorageTexture(const Context& context, TextureDetiler& detiler, 
         pendingMiss.assign(trackedLayers, BaselineMiss::None);
         layerPending.assign(trackedLayers, false);
         layerOriginal.assign(trackedLayers, true);
+        layerUnmapped.assign(trackedLayers, false);
         savedTicket.assign(trackedLayers, 0);
         baselineDue.assign(trackedLayers, false);
         rebaseTicket.assign(trackedLayers, 0);
@@ -4739,6 +4748,11 @@ std::uint64_t StorageTexture::OccasionalLabelStores() {
 }
 
 void StorageTexture::markLayersPending(std::uint32_t first, std::uint32_t count) {
+    {
+        auto& pending = Pending();
+        std::lock_guard lock(pending.mutex);
+        for (std::uint32_t layer = first; layer < first + count && layer < layerUnmapped.size(); ++layer) layerUnmapped[layer] = false;
+    }
     if (count != 0) GuestMemory::ForgetKnownZero(layerBegin(first), static_cast<std::size_t>(layerBegin(first + count - 1) + layerBytes(first + count - 1) - layerBegin(first)));
     {
         auto& records = LayoutWrites();
@@ -6326,6 +6340,22 @@ bool StorageTexture::ScanPending(std::span<PendingQuery> queries) {
     return identities;
 }
 
+bool StorageTexture::Created() {
+    return storageTexturesCreated().load(std::memory_order_acquire);
+}
+
+void StorageTexture::NoteUnmapped(std::uint64_t address, std::size_t bytes) {
+    auto& pending = Pending();
+    std::lock_guard lock(pending.mutex);
+    const auto end = address + bytes;
+    for (auto* texture : pending.textures) {
+        if (!texture->overlaps(address, bytes)) continue;
+        for (std::uint32_t unit = 0; unit < texture->trackedLayers && unit < texture->layerUnmapped.size(); ++unit) {
+            if (texture->layerPending[unit] && texture->layerBegin(unit) < end && address < texture->layerBegin(unit) + texture->layerBytes(unit)) texture->layerUnmapped[unit] = true;
+        }
+    }
+}
+
 std::size_t StorageTexture::DiscardPendingInside(std::uint64_t address, std::size_t bytes) {
     auto& pending = Pending();
     std::lock_guard lock(pending.mutex);
@@ -7373,7 +7403,27 @@ bool StorageTexture::cpuLeftUnchanged(std::uint32_t layer, std::uint64_t from, s
     return cpu[0] == 0;
 }
 
+std::optional<std::vector<bool>> StorageTexture::withoutUnmapped(const std::vector<bool>& layers) {
+    auto& pending = Pending();
+    std::lock_guard lock(pending.mutex);
+    std::optional<std::vector<bool>> kept;
+    for (std::uint32_t layer = 0; layer < trackedLayers && layer < layerUnmapped.size(); ++layer) {
+        if (!layers[layer] || !layerUnmapped[layer]) continue;
+        if (!kept) kept = layers;
+        (*kept)[layer] = false;
+        layerUnmapped[layer] = false;
+        layerPending[layer] = false;
+        layerOriginal[layer] = false;
+        cancelStoredSave(layer);
+    }
+    return kept;
+}
+
 void StorageTexture::writeBackLayers(const std::vector<bool>& layers) {
+    if (const auto kept = withoutUnmapped(layers)) {
+        writeBackLayers(*kept);
+        return;
+    }
     CaptureTrace::Log("writeback image=%llx generation=%llu reason=%s units=%zu", static_cast<unsigned long long>(descriptor.baseAddress), static_cast<unsigned long long>(generation), flushReason, static_cast<std::size_t>(std::count(layers.begin(), layers.end(), true)));
     static const bool profile = std::getenv("APS5_PROFILE_DRAW") != nullptr;
     PhaseTimer timer;
