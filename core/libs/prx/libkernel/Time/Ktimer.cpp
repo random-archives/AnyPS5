@@ -123,6 +123,7 @@ int APS5_VABI ktimer_delete_nid_postfix(int id) {
 }
 
 int APS5_VABI ktimer_settime_nid_postfix(int id, int flags, const GuestItimerspec* value, GuestItimerspec* oldValue) {
+    if ((flags & ~TimerAbstime) != 0) return static_cast<int>(Fail(GuestEinval));
     GuestItimerspec next{};
     if (!GuestCopyIn_nid_no_patch(&next, value, sizeof(next))) return static_cast<int>(Fail(GuestEfault));
     GuestItimerspec previous{};

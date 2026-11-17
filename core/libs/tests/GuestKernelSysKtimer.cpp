@@ -97,6 +97,9 @@ void InvalidIds() {
     Require(ktimer_settime_nid_postfix(id, 0, nullptr, nullptr) == -1 && Error() == Efault);
     const int valid = Create();
     Require(ktimer_gettime_nid_postfix(valid, nullptr) == -1 && Error() == Efault);
+    for (const int badFlags : {-1, 2, 3, 100}) {
+        Require(ktimer_settime_nid_postfix(valid, badFlags, &value, nullptr) == -1 && Error() == Einval);
+    }
     Require(ktimer_delete_nid_postfix(valid) == 0);
 }
 
