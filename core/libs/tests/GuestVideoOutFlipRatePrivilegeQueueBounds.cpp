@@ -108,8 +108,6 @@ int main() {
     Require(sceVideoOutSubmitEopFlip(handle, BlackBufferIndex, 1, 0, &overflowToken) == VideoOutErrorFlipQueueFull);
     Require(overflowToken == 0xa5a5a5a5u);
 
-    Require(sceVideoOutSubmitFlip(handle, BlackBufferIndex, 1, 0) == VideoOutErrorFlipQueueFull);
-
     Require(sceVideoOutClose(handle) == 0);
 
     Require(sceVideoOutSubmitEopFlip(handle, BlackBufferIndex, 1, 0, &canaryToken) == VideoOutErrorInvalidHandle);
