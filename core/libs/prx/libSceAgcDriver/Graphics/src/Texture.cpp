@@ -6348,16 +6348,18 @@ bool StorageTexture::Created() {
 void StorageTexture::NoteUnmapped(std::uint64_t address, std::size_t bytes) {
     auto& pending = Pending();
     std::lock_guard lock(pending.mutex);
-    if (!pending.textures.MayOverlap(address, bytes)) return;
+    if (pending.flushing.empty() && !pending.textures.MayOverlap(address, bytes)) return;
     const auto end = address + bytes;
-    for (auto* texture : pending.textures) {
-        if (!texture->overlaps(address, bytes)) continue;
+    const auto mark = [&](StorageTexture* texture) {
+        if (!texture->overlaps(address, bytes)) return;
         for (std::uint32_t unit = 0; unit < texture->trackedLayers && unit < texture->layerUnmapped.size(); ++unit) {
             if (!texture->layerPending[unit] || texture->layerBegin(unit) < address || texture->layerBegin(unit) + texture->layerBytes(unit) > end) continue;
             texture->layerUnmapped[unit] = true;
             texture->anyUnmapped.store(true, std::memory_order_release);
         }
-    }
+    };
+    for (auto* texture : pending.textures) mark(texture);
+    for (auto* texture : pending.flushing) mark(texture);
 }
 
 std::size_t StorageTexture::DiscardPendingInside(std::uint64_t address, std::size_t bytes) {
