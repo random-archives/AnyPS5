@@ -9134,7 +9134,31 @@ bool pendingUnmappedTests(const Device& device, Recorder& recorder) {
     recorder.Sync();
     Require(std::all_of(static_cast<const std::uint8_t*>(block), static_cast<const std::uint8_t*>(block) + surfaceBytes, [](std::uint8_t byte) { return byte == 0x5a; }), "(u) results discarded at unmap were still stored");
     Require(!StorageTexture::AnyPendingOverlaps(span), "(u) results over memory the guest unmapped stayed pending after the store");
-    std::cout << "results pending over memory the guest unmapped: kept pending during the unmap, dropped at the store\n";
+    {
+        GuestAllocations::Mutation mutation;
+        mutation.Add(block, surfaceBytes, true, true, true);
+    }
+    registered = true;
+    AgcDriver::GuestMemory::CollectWritesUncached(address, surfaceBytes);
+    const VkClearColorValue again{{1.0f, 0.0f, 0.0f, 1.0f}};
+    const auto redraw = recorder.Commands();
+    RecordMemoryBarrier(context, redraw, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_ACCESS_SHADER_WRITE_BIT | VK_ACCESS_TRANSFER_WRITE_BIT, VK_ACCESS_TRANSFER_WRITE_BIT);
+    context.Function<PFN_vkCmdClearColorImage>("vkCmdClearColorImage")(redraw, image->Image(), VK_IMAGE_LAYOUT_GENERAL, &again, 1, &range);
+    RecordMemoryBarrier(context, redraw, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, VK_ACCESS_TRANSFER_WRITE_BIT, VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT);
+    image->MarkDirty();
+    recorder.Submit();
+    device.WaitQueue();
+    recorder.Sync();
+    Require(StorageTexture::AnyPendingOverlaps(span), "(u) results drawn after the range was mapped again are not pending");
+    image->WriteBack();
+    recorder.Submit();
+    device.WaitQueue();
+    recorder.Sync();
+    const auto* bytes = static_cast<const std::uint8_t*>(block);
+    Require(bytes[0] == 0xff && bytes[1] == 0x00 && bytes[2] == 0x00 && bytes[3] == 0xff, "(u) results drawn after the range was mapped again were not stored");
+    Require(std::memcmp(bytes, bytes + 4, surfaceBytes - 4) == 0, "(u) results drawn after the range was mapped again were stored only in part");
+    Require(!StorageTexture::AnyPendingOverlaps(span), "(u) results drawn after the range was mapped again stayed pending after the store");
+    std::cout << "results pending over memory the guest unmapped: kept pending during the unmap, dropped at the store; results drawn after it was mapped again stored\n";
     return true;
 }
 
