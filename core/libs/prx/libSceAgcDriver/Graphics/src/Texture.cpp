@@ -6353,7 +6353,7 @@ void StorageTexture::NoteUnmapped(std::uint64_t address, std::size_t bytes) {
     for (auto* texture : pending.textures) {
         if (!texture->overlaps(address, bytes)) continue;
         for (std::uint32_t unit = 0; unit < texture->trackedLayers && unit < texture->layerUnmapped.size(); ++unit) {
-            if (!texture->layerPending[unit] || texture->layerBegin(unit) >= end || address >= texture->layerBegin(unit) + texture->layerBytes(unit)) continue;
+            if (!texture->layerPending[unit] || texture->layerBegin(unit) < address || texture->layerBegin(unit) + texture->layerBytes(unit) > end) continue;
             texture->layerUnmapped[unit] = true;
             texture->anyUnmapped.store(true, std::memory_order_release);
         }
