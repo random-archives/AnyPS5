@@ -6348,6 +6348,7 @@ bool StorageTexture::Created() {
 void StorageTexture::NoteUnmapped(std::uint64_t address, std::size_t bytes) {
     auto& pending = Pending();
     std::lock_guard lock(pending.mutex);
+    if (!pending.textures.MayOverlap(address, bytes)) return;
     const auto end = address + bytes;
     for (auto* texture : pending.textures) {
         if (!texture->overlaps(address, bytes)) continue;
