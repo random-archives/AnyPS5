@@ -41,6 +41,10 @@
 #include "Character.hpp"
 #include "Configuration.hpp"
 
+#include "BreakIterator.hpp"
+#include "Data.hpp"
+#include "ResourceBundle.hpp"
+
 #include "ConverterHelpers.hpp"
 #include "Utf16Search.hpp"
 #include "RecoveredSignatures.hpp"
