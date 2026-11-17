@@ -5449,7 +5449,6 @@ int APS5_VABI _ZNK7WebCore19ProtectionSpaceBase15isPasswordBasedEv();
 int APS5_VABI _ZNK7WebCore19ProtectionSpaceBase26receivesCredentialSecurelyEv();
 int APS5_VABI _ZNK7WebCore19ProtectionSpaceBase7isProxyEv();
 int APS5_VABI _ZNK7WebCore19ResourceRequestBase12isolatedCopyEv();
-int APS5_VABI _ZNK7WebCore19ResourceRequestBase13isConditionalEv();
 int APS5_VABI _ZNK7WebCore19ResourceRequestBase16httpHeaderFieldsEv();
 int APS5_VABI _ZNK7WebCore19ResourceRequestBase8httpBodyEv();
 int APS5_VABI _ZNK7WebCore19ResourceRequestBase9hasUploadEv();
