@@ -16135,6 +16135,25 @@ void mixedKeyClearTests(const Device& device, Recorder& recorder) {
     markKeys(smallKeyCount);
     Require(!MixedKeyClearRuns(smallResource, smallSurfaceBytes).has_value(), "MixedKeyClearRuns accepted ClearSingle in mixed keys");
 
+    if (AgcDriver::GuestMemory::Watched(address, smallSurfaceBytes) && AgcDriver::GuestMemory::Watched(keysAddress, smallKeyCount)) {
+        std::fill_n(texels, smallSurfaceBytes, std::byte{0x80});
+        AgcDriver::GuestMemory::CollectWrites(address, smallSurfaceBytes);
+        std::fill_n(keys, smallKeyCount, std::byte{0xff});
+        keys[1] = std::byte{0x00};
+        markKeys(smallKeyCount);
+        AgcDriver::GuestMemory::CollectWrites(keysAddress, smallKeyCount);
+        AgcDriver::GuestMemory::MarkWritten(address + 256, 256);
+        const auto drawn = MixedKeyClearRuns(smallResource, smallSurfaceBytes);
+        Require(drawn.has_value() && drawn->runs.empty(), "MixedKeyClearRuns kept a clear run the driver stored over after its keys were written");
+        markKeys(smallKeyCount);
+        const auto rekeyed = MixedKeyClearRuns(smallResource, smallSurfaceBytes);
+        const std::vector<std::pair<std::size_t, std::size_t>> expectedRekeyed{{1, 2}};
+        Require(rekeyed.has_value() && rekeyed->runs == expectedRekeyed, "MixedKeyClearRuns dropped a clear run whose keys were written after the driver's store");
+        texels[256] = std::byte{0x81};
+        const auto cpuWritten = MixedKeyClearRuns(smallResource, smallSurfaceBytes);
+        Require(cpuWritten.has_value() && cpuWritten->runs == expectedRekeyed, "MixedKeyClearRuns dropped a clear run over a CPU store");
+    }
+
     const auto readStorageTexel = [&](const std::shared_ptr<StorageTexture>& image, std::uint32_t x, std::uint32_t y) {
         Buffer readback(context, 4, VK_BUFFER_USAGE_TRANSFER_DST_BIT);
         std::memset(readback.Bytes().data(), 0x33, 4);

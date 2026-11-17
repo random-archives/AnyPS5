@@ -134,7 +134,7 @@ struct MixedKeyClear {
 };
 bool MixedKeyClearEnabled();
 std::optional<MixedKeyClear> MixedKeyClearRuns(const GuestTextureResource& resource, std::uint64_t guestBytes);
-std::optional<MixedKeyClear> MixedKeyClearRuns(std::uint64_t metaAddress, std::uint64_t surfaceBytes, VkFormat clearFormat, std::uint32_t elementBytes, bool alphaOnMsb);
+std::optional<MixedKeyClear> MixedKeyClearRuns(std::uint64_t metaAddress, std::uint64_t surfaceBytes, VkFormat clearFormat, std::uint32_t elementBytes, bool alphaOnMsb, std::uint64_t dataAddress = 0);
 void ApplyMixedKeyClear(const MixedKeyClear& clear, std::span<std::byte> dst, std::uint64_t sliceByteOffset = 0);
 void NoteKeysFillOnGpu(std::uint64_t begin, std::size_t count, DccKeys keys);
 std::optional<DccKeys> WaitForKeyWriters(const GuestTextureResource& resource, std::uint64_t guestBytes);

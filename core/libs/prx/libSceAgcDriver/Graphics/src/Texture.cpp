@@ -3506,6 +3506,7 @@ void StorageTexture::upload(const std::vector<bool>* layers) {
     }
     const auto mixedClear = uploadedKeys == DccKeys::Uncompressed && uploadedMixedSignature != 0 ? MixedKeyClearRuns(descriptor, guestBytes) : std::nullopt;
     if (uploadedMixedSignature != 0) uploadedMixedSignature = mixedClear.has_value() ? mixedClear->signature : 0;
+    const MixedKeyClear* const mixedFill = mixedClear.has_value() && !mixedClear->runs.empty() ? &*mixedClear : nullptr;
     std::vector<ImportSegment> segments;
     if (uploadedKeys == DccKeys::Uncompressed) {
         if (const auto* whole = HostImportFor(context, descriptor.baseAddress, static_cast<std::size_t>(guestBytes))) segments.push_back({whole, descriptor.baseAddress, descriptor.baseAddress + guestBytes});
@@ -3525,7 +3526,7 @@ void StorageTexture::upload(const std::vector<bool>* layers) {
         // A whole-surface upload of a block-unit image goes through the windows too when a unit
         // shadow holds part of the surface (the detile then reads the slabs; a new image has no
         // layout yet); a partial one always does.
-        if (blockUnits && (segments.size() > 1 || layers != nullptr || mixedClear.has_value() || AnyShadowedOverlaps(descriptor.baseAddress, static_cast<std::size_t>(guestBytes)))) {
+        if (blockUnits && (segments.size() > 1 || layers != nullptr || mixedFill != nullptr || AnyShadowedOverlaps(descriptor.baseAddress, static_cast<std::size_t>(guestBytes)))) {
             std::vector<std::pair<std::uint64_t, std::uint64_t>> runs;
             if (layers != nullptr) {
                 for (std::uint32_t unit = 0; unit < trackedLayers; ++unit) {
@@ -3536,7 +3537,7 @@ void StorageTexture::upload(const std::vector<bool>* layers) {
                 forgetBorrowed(0, trackedLayers);
                 runs.emplace_back(0, guestBytes);
             }
-            const auto uploadedBytes = uploadWindows(segments, runs, layers == nullptr && version == 0, mixedClear ? &*mixedClear : nullptr);
+            const auto uploadedBytes = uploadWindows(segments, runs, layers == nullptr && version == 0, mixedFill);
             countStorageUpload(1, uploadedBytes);
             if (layers != nullptr) {
                 partialUploads.fetch_add(1, std::memory_order_relaxed);
@@ -3557,7 +3558,7 @@ void StorageTexture::upload(const std::vector<bool>* layers) {
             }
         }
         const bool direct = singlePass();
-        auto cleared = mixedClear.has_value() ? std::make_shared<DeviceBuffer>(context, static_cast<std::size_t>(guestBytes), VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT) : nullptr;
+        auto cleared = mixedFill != nullptr ? std::make_shared<DeviceBuffer>(context, static_cast<std::size_t>(guestBytes), VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT) : nullptr;
         auto linear = direct ? nullptr : std::make_shared<DeviceBuffer>(context, static_cast<std::size_t>(linearBytes), VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_SRC_BIT);
         detiler.BeginBatch();
         auto* recorder = Recorder::Active();

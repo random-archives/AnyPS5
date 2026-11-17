@@ -3721,7 +3721,7 @@ bool prepareDraw(const Context& context, const State& state, const Pm4::DrawPara
                     else ReadColorTarget(color, pixels);
                 }
             } else if (keys == DccKeys::Mixed) {
-                if (const auto mixed = MixedKeyClearRuns(color.dccAddress, colorLayout.Bytes(), color.format, color.elementBytes, color.dccAlphaOnMsb)) {
+                if (const auto mixed = MixedKeyClearRuns(color.dccAddress, colorLayout.Bytes(), color.format, color.elementBytes, color.dccAlphaOnMsb, color.address)) {
                     if (binding.gpuTiling) {
                         ApplyMixedKeyClear(*mixed, binding.tiled->Bytes());
                     } else if (color.tileMode == ColorTileMode::Linear && colorLayout.Bytes() == colorLayout.LinearBytes()) {

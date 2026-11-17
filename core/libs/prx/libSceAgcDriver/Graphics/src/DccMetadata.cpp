@@ -585,6 +585,43 @@ std::optional<MixedKeyClear> scanMixedKeyClear(std::uint64_t metaAddress, std::u
     return MixedKeyClear{clearKeys, *pattern, hash, std::move(runs)};
 }
 
+void dropRunsWrittenAfterKeys(MixedKeyClear& clear, std::uint64_t dataAddress, std::uint64_t metaAddress) {
+    if (dataAddress == 0 || clear.runs.empty() || !GuestMemory::WriteWatched()) return;
+    constexpr std::uint64_t StampBytes = 65536;
+    const auto low = clear.runs.front().first;
+    const auto high = clear.runs.back().second;
+    GuestMemory::CollectWrites(dataAddress + static_cast<std::uint64_t>(low) * KeyBytes, (high - low) * KeyBytes);
+    GuestMemory::CollectWrites(metaAddress + low, high - low);
+    std::vector<std::pair<std::size_t, std::size_t>> kept;
+    std::vector<std::pair<std::size_t, std::size_t>> pieces;
+    std::vector<std::uint64_t> generations;
+    std::vector<std::uint8_t> changed;
+    std::vector<std::uint8_t> cpu;
+    for (const auto& [first, last] : clear.runs) {
+        pieces.clear();
+        generations.clear();
+        for (auto key = first; key < last;) {
+            const auto address = dataAddress + static_cast<std::uint64_t>(key) * KeyBytes;
+            const auto boundary = (address / StampBytes + 1) * StampBytes;
+            const auto next = std::min(last, std::max(key + 1, static_cast<std::size_t>((boundary - dataAddress + KeyBytes - 1) / KeyBytes)));
+            pieces.emplace_back(key, next);
+            generations.push_back(std::max<std::uint64_t>(GuestMemory::NewestStamp(metaAddress + key, next - key), 1));
+            key = next;
+        }
+        changed.assign(pieces.size(), GuestMemory::BlockUnchanged);
+        cpu.assign(pieces.size(), GuestMemory::BlockUnchanged);
+        const auto begin = dataAddress + static_cast<std::uint64_t>(first) * KeyBytes;
+        const bool known = GuestMemory::ChangedBlocks(begin, (last - first) * KeyBytes, generations, changed, cpu);
+        for (std::size_t index = 0; index < pieces.size(); ++index) {
+            if (known && changed[index] == GuestMemory::BlockWritten && cpu[index] == GuestMemory::BlockUnchanged) continue;
+            const auto [key, next] = pieces[index];
+            if (!kept.empty() && kept.back().second == key) kept.back().second = next;
+            else kept.emplace_back(key, next);
+        }
+    }
+    clear.runs = std::move(kept);
+}
+
 DccKeyState textureClearKeyState(const GuestTextureResource& resource, std::uint64_t guestBytes, bool& memoized) {
     memoized = false;
     if (resource.dccAddress == 0) return {};
@@ -787,11 +824,14 @@ std::optional<MixedKeyClear> MixedKeyClearRuns(const GuestTextureResource& resou
     if (resource.dccAddress == 0 || IsBlockCompressed(resource.format)) return std::nullopt;
     auto mixed = scanMixedKeyClear(resource.dccAddress, guestBytes, DccClearTextureFormat(resource.format), BytesPerElement(resource.format), resource.dccAlphaOnMsb);
     if (mixed.has_value() && DccClearTextureFormat(resource.format) == ResolveTextureFormat(resource.format) && IsConvertedTextureFormat(resource.format) && (mixed->keys == DccKeys::Clear0001 || mixed->keys == DccKeys::Clear1110)) return std::nullopt;
+    if (mixed.has_value()) dropRunsWrittenAfterKeys(*mixed, resource.baseAddress, resource.dccAddress);
     return mixed;
 }
 
-std::optional<MixedKeyClear> MixedKeyClearRuns(std::uint64_t metaAddress, std::uint64_t surfaceBytes, VkFormat clearFormat, std::uint32_t elementBytes, bool alphaOnMsb) {
-    return scanMixedKeyClear(metaAddress, surfaceBytes, clearFormat, elementBytes, alphaOnMsb);
+std::optional<MixedKeyClear> MixedKeyClearRuns(std::uint64_t metaAddress, std::uint64_t surfaceBytes, VkFormat clearFormat, std::uint32_t elementBytes, bool alphaOnMsb, std::uint64_t dataAddress) {
+    auto mixed = scanMixedKeyClear(metaAddress, surfaceBytes, clearFormat, elementBytes, alphaOnMsb);
+    if (mixed.has_value()) dropRunsWrittenAfterKeys(*mixed, dataAddress, metaAddress);
+    return mixed;
 }
 
 void ApplyMixedKeyClear(const MixedKeyClear& clear, std::span<std::byte> dst, std::uint64_t sliceByteOffset) {
