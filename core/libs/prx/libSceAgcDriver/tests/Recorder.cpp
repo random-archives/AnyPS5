@@ -9128,17 +9128,17 @@ bool pendingUnmappedTests(const Device& device, Recorder& recorder) {
         AgcDriver::GuestMemory::SetUnwatchHook(nullptr);
         AgcDriver::GuestMemory::Unwatch(address, surfaceBytes);
     }
+    {
+        GuestAllocations::Mutation mutation;
+        mutation.Add(block, surfaceBytes, true, true, true);
+    }
+    registered = true;
     image->WriteBack();
     recorder.Submit();
     device.WaitQueue();
     recorder.Sync();
     Require(std::all_of(static_cast<const std::uint8_t*>(block), static_cast<const std::uint8_t*>(block) + surfaceBytes, [](std::uint8_t byte) { return byte == 0x5a; }), "(u) results discarded at unmap were still stored");
     Require(!StorageTexture::AnyPendingOverlaps(span), "(u) results over memory the guest unmapped stayed pending after the store");
-    {
-        GuestAllocations::Mutation mutation;
-        mutation.Add(block, surfaceBytes, true, true, true);
-    }
-    registered = true;
     AgcDriver::GuestMemory::CollectWritesUncached(address, surfaceBytes);
     const VkClearColorValue again{{1.0f, 0.0f, 0.0f, 1.0f}};
     const auto redraw = recorder.Commands();
@@ -9158,7 +9158,115 @@ bool pendingUnmappedTests(const Device& device, Recorder& recorder) {
     Require(bytes[0] == 0xff && bytes[1] == 0x00 && bytes[2] == 0x00 && bytes[3] == 0xff, "(u) results drawn after the range was mapped again were not stored");
     Require(std::memcmp(bytes, bytes + 4, surfaceBytes - 4) == 0, "(u) results drawn after the range was mapped again were stored only in part");
     Require(!StorageTexture::AnyPendingOverlaps(span), "(u) results drawn after the range was mapped again stayed pending after the store");
-    std::cout << "results pending over memory the guest unmapped: kept pending during the unmap, dropped at the store; results drawn after it was mapped again stored\n";
+    std::cout << "results pending over memory the guest unmapped and mapped again: kept pending during the unmap, dropped at the store; results drawn after it was mapped again stored\n";
+    return true;
+}
+
+bool pendingPartialUnmapTests(const Device& device, Recorder& recorder) {
+    const auto& base = device.GetContext();
+    if (base.hostImportAlignment == 0) {
+        std::cout << "host imports unavailable: results pending over partly unmapped memory not tested\n";
+        return false;
+    }
+    constexpr std::size_t unit = 65536;
+    constexpr std::uint32_t side = 256;
+    const std::size_t surfaceBytes = static_cast<std::size_t>(side) * side * 4;
+    const auto decided = PrepareImportWatch(base);
+    SetImportWatch(base, ImportWatch::Watch);
+    struct Restore {
+        const Context& context;
+        ImportWatch decided;
+        ~Restore() { SetImportWatch(context, decided); }
+    } restore{base, decided};
+    void* block = AllocateWatched(surfaceBytes, unit);
+    if (block == nullptr) {
+        std::cout << "no write watching: results pending over partly unmapped memory not tested\n";
+        return false;
+    }
+    std::memset(block, 0x5a, surfaceBytes);
+    const auto address = reinterpret_cast<std::uint64_t>(block);
+    const std::size_t half = surfaceBytes / 2;
+    auto* second = static_cast<std::uint8_t*>(block) + half;
+    {
+        GuestAllocations::Mutation mutation;
+        mutation.Add(block, half, true, true, true);
+        mutation.Add(second, half, true, true, true);
+    }
+    bool registered = true;
+    struct Release {
+        const Context& context;
+        void* block;
+        void* second;
+        std::uint64_t address;
+        std::size_t surfaceBytes;
+        bool& registered;
+        ~Release() {
+            {
+                GuestAllocations::Mutation mutation;
+                if (registered) mutation.Remove(block);
+                mutation.Remove(second);
+            }
+            HostImportFor(context, address, surfaceBytes);
+            ReleaseWatched(block, surfaceBytes);
+        }
+    } release{base, block, second, address, surfaceBytes, registered};
+    AgcDriver::GuestMemory::CollectWritesUncached(address, surfaceBytes);
+    TextureDetiler detiler(base);
+    auto context = base;
+    context.detiler = &detiler;
+    GuestTextureResource resource{};
+    resource.baseAddress = address;
+    resource.width = side;
+    resource.height = side;
+    resource.mipCount = 1;
+    resource.tileMode = TextureTileMode::kR64KBX;
+    resource.dimension = TextureDimension::k2D;
+    resource.format = 56;
+    resource.dstSelX = 4;
+    resource.dstSelY = 5;
+    resource.dstSelZ = 6;
+    resource.dstSelW = 7;
+    Require(DescribeSurface(resource).guestBytes == surfaceBytes, "(p) unexpected surface size");
+    auto image = StorageTexture::Create(context, detiler, resource, 0);
+    recorder.Keep(image);
+    const VkImageSubresourceRange range{VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
+    const VkClearColorValue value{{0.0f, 1.0f, 0.0f, 1.0f}};
+    const auto commands = recorder.Commands();
+    RecordMemoryBarrier(context, commands, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_ACCESS_SHADER_WRITE_BIT | VK_ACCESS_TRANSFER_WRITE_BIT, VK_ACCESS_TRANSFER_WRITE_BIT);
+    context.Function<PFN_vkCmdClearColorImage>("vkCmdClearColorImage")(commands, image->Image(), VK_IMAGE_LAYOUT_GENERAL, &value, 1, &range);
+    RecordMemoryBarrier(context, commands, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, VK_ACCESS_TRANSFER_WRITE_BIT, VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT);
+    image->MarkDirty();
+    recorder.Submit();
+    device.WaitQueue();
+    recorder.Sync();
+    const std::array<std::pair<std::uint64_t, std::uint64_t>, 1> span{{{address, address + surfaceBytes}}};
+    Require(StorageTexture::AnyPendingOverlaps(span), "(p) the cleared image has no results pending");
+    {
+        GuestAllocations::Mutation mutation;
+        mutation.Remove(block);
+    }
+    registered = false;
+    Require(StorageTexture::AnyPendingOverlaps(span), "(p) the unmap settled the results while it was in progress");
+    {
+        struct Rehook {
+            ~Rehook() { AgcDriver::GuestMemory::SetUnwatchHook(&StorageTexture::SaveBeforeUnwatch); }
+        } rehook;
+        AgcDriver::GuestMemory::SetUnwatchHook(nullptr);
+        AgcDriver::GuestMemory::Unwatch(address, half);
+    }
+    {
+        GuestAllocations::Mutation mutation;
+        mutation.Add(block, half, true, true, true);
+    }
+    registered = true;
+    image->WriteBack();
+    recorder.Submit();
+    device.WaitQueue();
+    recorder.Sync();
+    const auto* bytes = static_cast<const std::uint8_t*>(block);
+    Require(std::all_of(bytes, bytes + half, [](std::uint8_t byte) { return byte == 0x5a; }), "(p) results over the half that was unmapped were still stored");
+    Require(!StorageTexture::AnyPendingOverlaps(span), "(p) results stayed pending after the store");
+    std::cout << "results pending over partly unmapped memory mapped again: the unmapped units dropped at the store, nothing left pending\n";
     return true;
 }
 
@@ -17520,6 +17628,7 @@ int main(int argc, char** argv) {
         }
         if (argc == 2 && std::string_view(argv[1]) == "--pending-after-unwatch-only") return pendingAfterLeavingWatchTests(device, recorder) ? 0 : 77;
         if (argc == 2 && std::string_view(argv[1]) == "--unmapped-pending-only") return pendingUnmappedTests(device, recorder) ? 0 : 77;
+        if (argc == 2 && std::string_view(argv[1]) == "--partly-unmapped-pending-only") return pendingPartialUnmapTests(device, recorder) ? 0 : 77;
         if (argc == 2 && std::string_view(argv[1]) == "--unwatch-lock-order-only") return unwatchHookLockOrderTests(device, recorder) ? 0 : 77;
         if (argc == 2 && std::string_view(argv[1]) == "--map-gate-publication-only") return mapGatePublicationTests(device, recorder) ? 0 : 77;
         if (argc == 2 && std::string_view(argv[1]) == "--map-gate-pending-only") return mapGatePendingTests(device, recorder) ? 0 : 77;
@@ -17959,6 +18068,7 @@ int main(int argc, char** argv) {
         staleGenerationTests(device, recorder);
         pendingAfterLeavingWatchTests(device, recorder);
         pendingUnmappedTests(device, recorder);
+        pendingPartialUnmapTests(device, recorder);
         importWindowTests(device, recorder);
         dataWordPositionsTests();
         dataRefreshTests(device, recorder);
