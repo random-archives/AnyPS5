@@ -4748,10 +4748,11 @@ std::uint64_t StorageTexture::OccasionalLabelStores() {
 }
 
 void StorageTexture::markLayersPending(std::uint32_t first, std::uint32_t count) {
-    {
+    if (anyUnmapped.load(std::memory_order_acquire)) {
         auto& pending = Pending();
         std::lock_guard lock(pending.mutex);
         for (std::uint32_t layer = first; layer < first + count && layer < layerUnmapped.size(); ++layer) layerUnmapped[layer] = false;
+        anyUnmapped.store(std::find(layerUnmapped.begin(), layerUnmapped.end(), true) != layerUnmapped.end(), std::memory_order_release);
     }
     if (count != 0) GuestMemory::ForgetKnownZero(layerBegin(first), static_cast<std::size_t>(layerBegin(first + count - 1) + layerBytes(first + count - 1) - layerBegin(first)));
     {
@@ -6351,7 +6352,9 @@ void StorageTexture::NoteUnmapped(std::uint64_t address, std::size_t bytes) {
     for (auto* texture : pending.textures) {
         if (!texture->overlaps(address, bytes)) continue;
         for (std::uint32_t unit = 0; unit < texture->trackedLayers && unit < texture->layerUnmapped.size(); ++unit) {
-            if (texture->layerPending[unit] && texture->layerBegin(unit) < end && address < texture->layerBegin(unit) + texture->layerBytes(unit)) texture->layerUnmapped[unit] = true;
+            if (!texture->layerPending[unit] || texture->layerBegin(unit) >= end || address >= texture->layerBegin(unit) + texture->layerBytes(unit)) continue;
+            texture->layerUnmapped[unit] = true;
+            texture->anyUnmapped.store(true, std::memory_order_release);
         }
     }
 }
@@ -7404,6 +7407,7 @@ bool StorageTexture::cpuLeftUnchanged(std::uint32_t layer, std::uint64_t from, s
 }
 
 std::optional<std::vector<bool>> StorageTexture::withoutUnmapped(const std::vector<bool>& layers) {
+    if (!anyUnmapped.load(std::memory_order_acquire)) return std::nullopt;
     auto& pending = Pending();
     std::lock_guard lock(pending.mutex);
     std::optional<std::vector<bool>> kept;
@@ -7416,6 +7420,7 @@ std::optional<std::vector<bool>> StorageTexture::withoutUnmapped(const std::vect
         layerOriginal[layer] = false;
         cancelStoredSave(layer);
     }
+    anyUnmapped.store(std::find(layerUnmapped.begin(), layerUnmapped.end(), true) != layerUnmapped.end(), std::memory_order_release);
     return kept;
 }
 

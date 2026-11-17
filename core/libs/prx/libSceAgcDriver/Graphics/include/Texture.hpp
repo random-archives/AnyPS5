@@ -905,6 +905,7 @@ private:
     // `original` holds the guest bytes; false after a GPU-side clear, which never read them.
     std::vector<bool> layerOriginal;
     std::vector<bool> layerUnmapped;
+    std::atomic<bool> anyUnmapped{false};
     std::map<std::uint64_t, std::uint64_t> keptAtUnwatch;
     std::shared_ptr<Buffer> savedBytes;
     std::vector<std::uint64_t> savedTicket;
