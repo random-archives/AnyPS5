@@ -208,8 +208,6 @@ __asm__(APS5_ASM_FUNCTION("RSA_sign") "jmp *__imp_RSA_sign_nid_postfix(%rip)\n")
 
 __asm__(APS5_ASM_FUNCTION("ENGINE_cleanup") "jmp *__imp_ENGINE_cleanup_nid_postfix(%rip)\n");
 
-__asm__(APS5_ASM_FUNCTION("EVP_DecryptUpdate") "jmp *__imp_EVP_DecryptUpdate_nid_postfix(%rip)\n");
-
 __asm__(APS5_ASM_FUNCTION("ECDSA_verify") "jmp *__imp_ECDSA_verify_nid_postfix(%rip)\n");
 
 __asm__(APS5_ASM_FUNCTION("i2d_X509_PUBKEY") "jmp *__imp_i2d_X509_PUBKEY_nid_postfix(%rip)\n");
@@ -277,8 +275,6 @@ __asm__(APS5_ASM_FUNCTION("SSL_CTX_set1_groups_list") "jmp *__imp_SSL_CTX_set1_g
 __asm__(APS5_ASM_FUNCTION("SSL_CIPHER_get_version") "jmp *__imp_SSL_CIPHER_get_version_nid_postfix(%rip)\n");
 
 __asm__(APS5_ASM_FUNCTION("SSL_get0_param") "jmp *__imp_SSL_get0_param_nid_postfix(%rip)\n");
-
-__asm__(APS5_ASM_FUNCTION("EVP_EncryptUpdate") "jmp *__imp_EVP_EncryptUpdate_nid_postfix(%rip)\n");
 
 __asm__(APS5_ASM_FUNCTION("X509_VERIFY_PARAM_set1_ip_asc") "jmp *__imp_X509_VERIFY_PARAM_set1_ip_asc_nid_postfix(%rip)\n");
 
@@ -918,14 +914,8 @@ APS5_EXPORT("vY2bEjTQwD4", libreSsl3Forward_X509_get_pubkey_nid_no_patch);
 __asm__(APS5_ASM_FUNCTION("libreSsl3Forward_X509_STORE_add_cert_nid_no_patch") "jmp *__imp_X509_STORE_add_cert_nid_postfix(%rip)\n");
 APS5_EXPORT("vfV2r97B45A", libreSsl3Forward_X509_STORE_add_cert_nid_no_patch);
 
-__asm__(APS5_ASM_FUNCTION("libreSsl3Forward_PEM_read_bio_PrivateKey_nid_no_patch") "jmp *__imp_PEM_read_bio_PrivateKey_nid_postfix(%rip)\n");
-APS5_EXPORT("vn5B1QygBJM", libreSsl3Forward_PEM_read_bio_PrivateKey_nid_no_patch);
-
 __asm__(APS5_ASM_FUNCTION("libreSsl3Forward_X509_EXTENSION_get_critical_nid_no_patch") "jmp *__imp_X509_EXTENSION_get_critical_nid_postfix(%rip)\n");
 APS5_EXPORT("w+aChZeGKxo", libreSsl3Forward_X509_EXTENSION_get_critical_nid_no_patch);
-
-__asm__(APS5_ASM_FUNCTION("libreSsl3Forward_EVP_CipherUpdate_nid_no_patch") "jmp *__imp_EVP_CipherUpdate_nid_postfix(%rip)\n");
-APS5_EXPORT("w03a1pfG8oM", libreSsl3Forward_EVP_CipherUpdate_nid_no_patch);
 
 __asm__(APS5_ASM_FUNCTION("libreSsl3Forward_SSL_CTX_use_PrivateKey_file_nid_no_patch") "jmp *__imp_SSL_CTX_use_PrivateKey_file_nid_postfix(%rip)\n");
 APS5_EXPORT("wPBtYd5mlzo", libreSsl3Forward_SSL_CTX_use_PrivateKey_file_nid_no_patch);
@@ -974,5 +964,14 @@ APS5_EXPORT("zYLz0S-xya0", libreSsl3Forward_RSA_private_decrypt_nid_no_patch);
 
 __asm__(APS5_ASM_FUNCTION("libreSsl3Forward_DTLSv1_server_method_nid_no_patch") "jmp *__imp_DTLSv1_server_method_nid_postfix(%rip)\n");
 APS5_EXPORT("znTrJH9b2h8", libreSsl3Forward_DTLSv1_server_method_nid_no_patch);
+
+__asm__(APS5_ASM_FUNCTION("libreSsl3Forward_EVP_aes_128_wrap_nid_no_patch") "jmp *__imp_EVP_aes_128_wrap_nid_postfix(%rip)\n");
+APS5_EXPORT("MPYmtcrGwQw", libreSsl3Forward_EVP_aes_128_wrap_nid_no_patch);
+
+__asm__(APS5_ASM_FUNCTION("libreSsl3Forward_EVP_aes_192_wrap_nid_no_patch") "jmp *__imp_EVP_aes_192_wrap_nid_postfix(%rip)\n");
+APS5_EXPORT("K7TCNQ4DrdE", libreSsl3Forward_EVP_aes_192_wrap_nid_no_patch);
+
+__asm__(APS5_ASM_FUNCTION("libreSsl3Forward_EVP_aes_256_wrap_nid_no_patch") "jmp *__imp_EVP_aes_256_wrap_nid_postfix(%rip)\n");
+APS5_EXPORT("mcYVamD0JVM", libreSsl3Forward_EVP_aes_256_wrap_nid_no_patch);
 
 }
