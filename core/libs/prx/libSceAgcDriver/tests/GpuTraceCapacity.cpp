@@ -1,3 +1,4 @@
+#include "prx/libSceAgcDriver/Execution/include/Driver.hpp"
 #include "prx/libSceAgcDriver/Execution/include/PerformanceTrace.hpp"
 #include "execution/VulkanTestDevice.hpp"
 #include <SDL_stdinc.h>
@@ -96,11 +97,18 @@ int Run(int argc, char** argv) {
 }
 
 int main(int argc, char** argv) {
+    int result = 1;
     try {
-        return Run(argc, argv);
+        result = Run(argc, argv);
     } catch (const std::exception& error) {
         AgcDriver::PerformanceTrace::StopOutput();
         std::cerr << error.what() << '\n';
-        return 1;
     }
+    try {
+        AgcDriverShutdown_nid_postfix();
+    } catch (const std::exception& error) {
+        std::cerr << error.what() << '\n';
+        result = 1;
+    }
+    return result;
 }
