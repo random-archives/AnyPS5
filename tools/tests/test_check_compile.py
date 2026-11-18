@@ -1210,5 +1210,31 @@ class CheckCompileLauncherTests(unittest.TestCase):
                     check_compile.syntax_arguments(arguments, Path.cwd(), source)
 
 
+    def test_validate_arguments_requires_a_nonempty_string_list(self):
+        check_compile.validate_arguments(["cc", "-c", "a.cpp"])
+        for bad in ([], ["", "x"], "cc -c a.cpp", [1, "x"]):
+            with self.assertRaises(ValueError, msg=repr(bad)):
+                check_compile.validate_arguments(bad)
+
+
+    def test_entry_key_is_relative_to_root_or_absolute(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            inside = {"directory": str(root / "build"), "file": "../src/a.cpp"}
+            self.assertEqual(check_compile.entry_key(inside, root), "src/a.cpp")
+            outside = {"directory": str(root), "file": "/elsewhere/b.cpp"}
+            self.assertEqual(check_compile.entry_key(outside, root), "/elsewhere/b.cpp")
+
+
+    @unittest.skipIf(os.name == "nt", "the POSIX command splitter is used off Windows")
+    def test_command_arguments_splits_quoted_words(self):
+        self.assertEqual(check_compile.command_arguments("cc -c 'a b.cpp' -o x.o"), ["cc", "-c", "a b.cpp", "-o", "x.o"])
+class EntriesTests(unittest.TestCase):
+    def test_entries_rejects_a_build_that_is_not_a_directory(self):
+        with tempfile.TemporaryDirectory() as directory:
+            with self.assertRaises(ValueError):
+                check_compile.entries(Path(directory) / "missing-build")
+
+
 if __name__ == "__main__":
     unittest.main()
