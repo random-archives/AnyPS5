@@ -14,6 +14,7 @@
 namespace ShaderRecompiler::ShaderDiskCache {
 
 inline constexpr std::uint32_t FormatVersion = 91;
+inline constexpr std::size_t MaxCachedSpirvWords = 16u * 1024u * 1024u;
 
 enum class LoadStatus {
     Loaded,
