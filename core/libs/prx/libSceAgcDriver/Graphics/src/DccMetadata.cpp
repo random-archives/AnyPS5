@@ -815,6 +815,11 @@ bool DccAlphaOnMsb(VkFormat format, std::uint32_t componentSwap) {
     return componentSwap != standardReversed && componentSwap != alternateReversed;
 }
 
+DccKeys ScannedDccKeys(std::uint64_t metaAddress, std::size_t keyCount) {
+    const std::span keys(reinterpret_cast<const std::uint8_t*>(metaAddress), keyCount);
+    return std::ranges::all_of(keys, [&](std::uint8_t key) { return key == keys.front(); }) ? ByteKeys(keys.front()) : DccKeys::Mixed;
+}
+
 bool MixedKeyClearEnabled() {
     static const bool disabled = std::getenv("APS5_NO_MIXED_KEY_CLEAR") != nullptr;
     return !disabled;
