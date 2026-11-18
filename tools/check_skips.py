@@ -16,6 +16,8 @@ NO_VULKAN_DEVICE = re.compile(r"skipped,.*no usable Vulkan device", re.IGNORECAS
 NO_RAW_SOCKET = re.compile(r"skipped,.*cannot create a raw socket", re.IGNORECASE)
 
 HIGH_REFRESH_LIMITATION = re.compile(r"current display does not provide 120 Hz", re.IGNORECASE)
+
+WINDOWS_STARTUP_BANNER = re.compile(r"^\[(time\] scheduler tick|src/HostCpu\.cpp:\d+)", re.IGNORECASE)
 CTEST_SKIP_STATUS = re.compile(r"SKIP_RETURN_CODE=\d+|SKIP_REGULAR_EXPRESSION_MATCHED", re.IGNORECASE)
 
 WINDOWS_PREFIX = "agc"
@@ -41,7 +43,7 @@ def high_refresh_limitation(output):
         reason = line.strip()
         if match := re.search(r"skipped,", reason, re.IGNORECASE):
             reason = reason[match.end():].strip()
-        if reason:
+        if reason and not WINDOWS_STARTUP_BANNER.search(reason):
             reasons.append(reason)
     return bool(reasons) and all(HIGH_REFRESH_LIMITATION.fullmatch(reason) for reason in reasons)
 
