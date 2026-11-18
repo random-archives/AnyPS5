@@ -31,6 +31,8 @@ constexpr std::array<const char*, SwitchCount> SwitchNames{
     "APS5_DRAW_TABLE_SNAPSHOT",
     "APS5_NO_TARGET_MEMO",
     "APS5_NO_TARGET_MEMO_OVERLAP_CACHE",
+    "APS5_DIRECT_BATCHES",
+    "APS5_NO_STREAMED_PUSH_DESCRIPTORS",
 };
 
 struct SwitchValues {
@@ -51,6 +53,8 @@ struct SwitchValues {
             std::getenv("APS5_DRAW_TABLE_SNAPSHOT") != nullptr,
             std::getenv("APS5_NO_TARGET_MEMO") != nullptr,
             std::getenv("APS5_NO_TARGET_MEMO_OVERLAP_CACHE") != nullptr,
+            std::getenv("APS5_DIRECT_BATCHES") != nullptr,
+            std::getenv("APS5_NO_STREAMED_PUSH_DESCRIPTORS") != nullptr,
         };
         for (std::size_t index = 0; index < SwitchCount; ++index) set[index].store(environment[index], std::memory_order_relaxed);
     }
@@ -85,6 +89,12 @@ std::string FlippableList() {
 
 namespace RuntimeSwitches {
 
+namespace {
+
+std::atomic<std::uint64_t> generation{0};
+
+}
+
 const char* Name(RuntimeSwitch id) {
     return SwitchNames.at(static_cast<std::size_t>(id));
 }
@@ -94,7 +104,11 @@ bool Set(RuntimeSwitch id) {
 }
 
 void Assign(RuntimeSwitch id, bool set) {
-    Values().set.at(static_cast<std::size_t>(id)).store(set, std::memory_order_relaxed);
+    if (Values().set.at(static_cast<std::size_t>(id)).exchange(set, std::memory_order_relaxed) != set) generation.fetch_add(1, std::memory_order_release);
+}
+
+std::uint64_t Generation() {
+    return generation.load(std::memory_order_acquire);
 }
 
 std::optional<RuntimeSwitch> Find(std::string_view name) {
