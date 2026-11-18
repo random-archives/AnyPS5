@@ -4013,7 +4013,9 @@ bool prepareDraw(const Context& context, const State& state, const Pm4::DrawPara
                         else ReadColorTarget(color, pixels);
                     }
                 } else if (keys == DccKeys::Mixed) {
-                    if (const auto mixed = MixedKeyClearRuns(color.dccAddress, colorLayout.Bytes(), color.format, color.elementBytes, color.dccAlphaOnMsb, color.address)) {
+                    const bool convertedTarget = color.packing != ShaderRecompiler::ColorExportPacking::None || color.staged;
+                    const auto mixed = MixedKeyClearRuns(color.dccAddress, colorLayout.Bytes(), color.format, color.elementBytes, color.dccAlphaOnMsb, color.address);
+                    if (mixed.has_value() && !(convertedTarget && (mixed->keys == DccKeys::Clear0001 || mixed->keys == DccKeys::Clear1110))) {
                         if (binding.gpuTiling) {
                             ApplyMixedKeyClear(*mixed, binding.tiled->Bytes());
                         } else if (color.tileMode == ColorTileMode::Linear && colorLayout.Bytes() == colorLayout.LinearBytes()) {

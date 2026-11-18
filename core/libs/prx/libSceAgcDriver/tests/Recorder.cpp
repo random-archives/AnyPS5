@@ -16309,6 +16309,40 @@ void mixedKeyClearTests(const Device& device, Recorder& recorder) {
         Require(readStorageTexel(largeImage, 128, 64) == 0x80808080u, "uploadWindows overwrote block 258 after boundary run");
         Require(readStorageTexel(largeImage, 0, 128) == 0x80808080u, "uploadWindows overwrote unit 2 uncompressed texels");
         Require(texels[0] == std::byte{0x80} && texels[65536] == std::byte{0x80}, "uploadWindows mutated guest texels");
+        largeImage.reset();
+        SharedResourceCache().Clear();
+        ClearCachedTextures(context.device);
+        recorder.Sync();
+
+        GuestTextureResource tiledResource = largeResource;
+        tiledResource.tileMode = TextureTileMode::kR64KBX;
+        std::fill_n(texels, largeSurfaceBytes, std::byte{0x80});
+        std::fill_n(keys, largeKeyCount, std::byte{0xff});
+        std::fill_n(keys, 4, std::byte{0x00});
+        std::fill_n(keys + 254, 4, std::byte{0x00});
+        markKeys(largeKeyCount);
+        auto tiledImage = StorageTexture::Create(context, detiler, tiledResource, 0);
+        Require(tiledImage->UploadedMixedSignature() != 0u, "tiled block-unit StorageTexture did not record mixed signature");
+        Buffer tiledReadback(context, largeSurfaceBytes, VK_BUFFER_USAGE_TRANSFER_DST_BIT);
+        {
+            const auto commands = recorder.Commands();
+            recorder.Keep(tiledImage);
+            RecordMemoryBarrier(context, commands, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT | VK_ACCESS_TRANSFER_WRITE_BIT, VK_ACCESS_TRANSFER_READ_BIT);
+            VkBufferImageCopy copy{};
+            copy.imageSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
+            copy.imageExtent = {largeSide, largeSide, 1};
+            context.Function<PFN_vkCmdCopyImageToBuffer>("vkCmdCopyImageToBuffer")(commands, tiledImage->Image(), VK_IMAGE_LAYOUT_GENERAL, tiledReadback.Handle(), 1, &copy);
+            RecordMemoryBarrier(context, commands, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_HOST_BIT, VK_ACCESS_TRANSFER_WRITE_BIT, VK_ACCESS_HOST_READ_BIT);
+        }
+        recorder.Sync();
+        std::size_t cleared = 0, stored = 0;
+        for (std::size_t texel = 0; texel < largeSurfaceBytes / 4; ++texel) {
+            std::uint32_t value = 0;
+            std::memcpy(&value, tiledReadback.Bytes().data() + texel * 4, sizeof(value));
+            cleared += value == 0x00000000u;
+            stored += value == 0x80808080u;
+        }
+        Require(cleared == 8 * 64 && stored == largeSurfaceBytes / 4 - 8 * 64, "tiled uploadWindows filled " + std::to_string(cleared) + " texels with the clear and kept " + std::to_string(stored) + " stored texels, expected 512 and the rest");
     }
 
     SharedResourceCache().Clear();
