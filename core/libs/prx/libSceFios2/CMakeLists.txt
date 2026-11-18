@@ -24,8 +24,6 @@ if(BUILD_TESTING)
         set_tests_properties(guest_fios2_cache_bounds PROPERTIES ENVIRONMENT_MODIFICATION
             "PATH=path_list_prepend:$<TARGET_FILE_DIR:libSceFios2>")
     endif()
-endif()
-
 
     add_test_executable(guest_fios2_init_queue_bounds_tests ${LIBS_INCLUDE_DIR}/tests/GuestFios2InitQueueBounds.cpp)
     target_include_directories(guest_fios2_init_queue_bounds_tests PRIVATE ${LIBS_INCLUDE_DIR})
@@ -37,3 +35,4 @@ endif()
         set_tests_properties(guest_fios2_init_queue_bounds PROPERTIES ENVIRONMENT_MODIFICATION
             "PATH=path_list_prepend:$<TARGET_FILE_DIR:libSceFios2>")
     endif()
+endif()
