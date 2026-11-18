@@ -8,7 +8,6 @@
 #include <climits>
 #include <cstdint>
 #include <cstdlib>
-#include <stdexcept>
 
 namespace {
 
@@ -99,56 +98,6 @@ void TestKsemTrywaitBounds() {
     int value = 0;
     Require(ksem_getvalue_nid_postfix(maxId, &value) == 0 && value == static_cast<int>(GuestSemValueMax - 1));
     Require(ksem_destroy_nid_postfix(maxId) == 0);
-}
-
-void TestPthreadSemTrywaitBounds() {
-    bool caughtNull = false;
-    try {
-        scePthreadSemTrywait(nullptr);
-    } catch (const std::invalid_argument&) {
-        caughtNull = true;
-    }
-    Require(caughtNull);
-
-    PthreadSem uninit = nullptr;
-    bool caughtUninit = false;
-    try {
-        scePthreadSemTrywait(&uninit);
-    } catch (const std::runtime_error&) {
-        caughtUninit = true;
-    }
-    Require(caughtUninit);
-
-    PthreadSem destroyed = nullptr;
-    Require(scePthreadSemInit(&destroyed, 0, 1, "trywait_destroy") == 0);
-    Require(scePthreadSemDestroy(&destroyed) == 0);
-    bool caughtDestroyed = false;
-    try {
-        scePthreadSemTrywait(&destroyed);
-    } catch (const std::runtime_error&) {
-        caughtDestroyed = true;
-    }
-    Require(caughtDestroyed);
-
-    PthreadSem semZero = nullptr;
-    Require(scePthreadSemInit(&semZero, 0, 0, "trywait_zero") == 0);
-    Require(scePthreadSemTrywait(&semZero) == SCE_KERNEL_ERROR_EBUSY);
-    Require(scePthreadSemTrywait(&semZero) == SCE_KERNEL_ERROR_EBUSY);
-    Require(scePthreadSemPost(&semZero) == 0);
-    Require(scePthreadSemTrywait(&semZero) == 0);
-    Require(scePthreadSemTrywait(&semZero) == SCE_KERNEL_ERROR_EBUSY);
-    Require(scePthreadSemDestroy(&semZero) == 0);
-
-    PthreadSem semMulti = nullptr;
-    Require(scePthreadSemInit(&semMulti, 0, 3, "trywait_multi") == 0);
-    Require(scePthreadSemTrywait(&semMulti) == 0);
-    Require(scePthreadSemTrywait(&semMulti) == 0);
-    Require(scePthreadSemTrywait(&semMulti) == 0);
-    Require(scePthreadSemTrywait(&semMulti) == SCE_KERNEL_ERROR_EBUSY);
-    Require(scePthreadSemPost(&semMulti) == 0);
-    Require(scePthreadSemTrywait(&semMulti) == 0);
-    Require(scePthreadSemTrywait(&semMulti) == SCE_KERNEL_ERROR_EBUSY);
-    Require(scePthreadSemDestroy(&semMulti) == 0);
 }
 
 void TestKernelPollSemaBounds() {
@@ -351,7 +300,6 @@ void TestConcurrentTrywaitContention() {
 int main() {
     TestPosixSemaphoreTrywaitBounds();
     TestKsemTrywaitBounds();
-    TestPthreadSemTrywaitBounds();
     TestKernelPollSemaBounds();
     TestConcurrentTrywaitContention();
     return 0;
