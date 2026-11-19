@@ -6422,10 +6422,6 @@ int APS5_VABI _ZN7WebCore10Pasteboard4readERNS_20PasteboardFileReaderEN3WTF8Opti
     NotImplemented_nid_no_patch(__func__);
 }
 
-int APS5_VABI _ZN7WebCore11FontCascade18shouldUseSmoothingEv() {
-    NotImplemented_nid_no_patch(__func__);
-}
-
 int APS5_VABI _ZN7WebCore17FrameLoaderClient27registerForIconNotificationEv() {
     NotImplemented_nid_no_patch(__func__);
 }
@@ -7428,10 +7424,6 @@ int APS5_VABI _ZN7WebCore23commonInclusiveAncestorERKNS_11SimpleRangeE() {
 }
 
 int APS5_VABI _ZN7WebCore6Chrome5printERNS_5FrameE() {
-    NotImplemented_nid_no_patch(__func__);
-}
-
-int APS5_VABI _ZN7WebCore11FontCascade21setShouldUseSmoothingEb() {
     NotImplemented_nid_no_patch(__func__);
 }
 
@@ -14540,10 +14532,6 @@ int APS5_VABI _ZN7WebCore11FileChooserD2Ev() {
     NotImplemented_nid_no_patch(__func__);
 }
 
-int APS5_VABI _ZN7WebCore11FontCascade11setCodePathENS0_8CodePathE() {
-    NotImplemented_nid_no_patch(__func__);
-}
-
 int APS5_VABI _ZN7WebCore11FontCascadeC1EONS_22FontCascadeDescriptionEff() {
     NotImplemented_nid_no_patch(__func__);
 }
@@ -15568,18 +15556,6 @@ int APS5_VABI _ZN7WebCore13AXObjectCache10rootObjectEv() {
 }
 
 int APS5_VABI _ZN7WebCore13AXObjectCache11getOrCreateEPNS_4NodeE() {
-    NotImplemented_nid_no_patch(__func__);
-}
-
-int APS5_VABI _ZN7WebCore13AXObjectCache19enableAccessibilityEv() {
-    NotImplemented_nid_no_patch(__func__);
-}
-
-int APS5_VABI _ZN7WebCore13AXObjectCache20disableAccessibilityEv() {
-    NotImplemented_nid_no_patch(__func__);
-}
-
-int APS5_VABI _ZN7WebCore13AXObjectCache37setEnhancedUserInterfaceAccessibilityEb() {
     NotImplemented_nid_no_patch(__func__);
 }
 
