@@ -202,8 +202,8 @@ void VerifyTessellationInstancePatches() {
 
 std::string SerializeVersion56(const ShaderRecompiler::RecompileRequest& request) {
     auto bytes = DecodeBase64(ShaderRecompiler::RequestSerializer{}.Serialize(request));
-    Require(bytes.size() > 14u && bytes[4] == 62u);
-    bytes.resize(bytes.size() - 6u);
+    Require(bytes.size() > 16u && bytes[4] == 63u);
+    bytes.resize(bytes.size() - 8u);
     bytes[4] = 56u;
     return EncodeBase64(bytes);
 }
@@ -226,8 +226,8 @@ void VerifyTargetOptions() {
                     Require(replay.request.target.float16WidenNans == widen && replay.request.target.float16NarrowNans == narrow);
                     Require(serializer.Serialize(replay.request) == encoded);
                     auto bytes = DecodeBase64(encoded);
-                    Require(bytes[4] == 62u && bytes.back() == 0u);
-                    for (std::size_t missing = 1u; missing <= 6u; ++missing) {
+                    Require(bytes[4] == 63u && bytes.back() == 0u);
+                    for (std::size_t missing = 1u; missing <= 8u; ++missing) {
                         auto truncated = bytes;
                         truncated.resize(truncated.size() - missing);
                         bool rejected = false;
@@ -238,7 +238,7 @@ void VerifyTargetOptions() {
                         }
                         Require(rejected);
                     }
-                    bytes.pop_back();
+                    bytes.resize(bytes.size() - 3u);
                     bytes[4] = 57u;
                     const auto legacy57 = serializer.Deserialize(EncodeBase64(bytes));
                     Require(legacy57.request.target.fixedPushSlots == fixed && legacy57.request.target.maxImageArrayLayers == layers && !legacy57.request.target.spannedAnySubgroup);
@@ -776,7 +776,7 @@ int VerifyVersion56Compatibility() {
         version40[4] = 40u;
         const auto replay40 = serializer.Deserialize(EncodeBase64(version40));
         Require(!replay40.request.target.float32DenormPreserve && replay40.request.target.float32FlushToZero == !preserve);
-        for (const std::uint8_t unwritten : {58u, 59u, 60u, 61u, 63u}) {
+        for (const std::uint8_t unwritten : {58u, 59u, 60u, 61u, 64u}) {
             auto future = bytes;
             future[4] = unwritten;
             bool futureRejected = false;
@@ -891,12 +891,12 @@ int VerifyVersion56Compatibility() {
         const auto replay35 = serializer.Deserialize(EncodeBase64(version35));
         Require(replay35.request.target.spannedWaves == spanned && !replay35.request.target.float32FlushToZero);
         request.target.spannedAnySubgroup = spanned;
-        const auto version62 = DecodeBase64(serializer.Serialize(request));
-        Require(version62[4] == 62u && version62.back() == (spanned ? 1u : 0u));
-        Require(serializer.Deserialize(EncodeBase64(version62)).request.target.spannedAnySubgroup == spanned);
-        auto version57 = version62;
+        const auto version63 = DecodeBase64(serializer.Serialize(request));
+        Require(version63[4] == 63u && version63[version63.size() - 3u] == (spanned ? 1u : 0u) && version63[version63.size() - 2u] == 0u && version63.back() == 0u);
+        Require(serializer.Deserialize(EncodeBase64(version63)).request.target.spannedAnySubgroup == spanned);
+        auto version57 = version63;
         version57[4] = 57u;
-        version57.pop_back();
+        version57.resize(version57.size() - 3u);
         const auto replay57 = serializer.Deserialize(EncodeBase64(version57));
         Require(replay57.request.target.float32FlushToZero && !replay57.request.target.spannedAnySubgroup);
         const auto replay56 = serializer.Deserialize(SerializeVersion56(request));
@@ -1169,7 +1169,31 @@ int VerifyVersion56Compatibility() {
     return 0;
 }
 
+void VerifyFmaOptions() {
+    const ShaderRecompiler::RequestSerializer serializer;
+    for (const bool f16 : {false, true}) {
+        for (const bool f32 : {false, true}) {
+            ShaderRecompiler::RecompileRequest request{};
+            request.target.fmaFloat16 = f16;
+            request.target.fmaFloat32 = f32;
+            const auto encoded = serializer.Serialize(request);
+            auto bytes = DecodeBase64(encoded);
+            Require(bytes.size() > 13u && bytes[4] == 63u);
+            Require(bytes[bytes.size() - 2u] == (f16 ? 1u : 0u) && bytes[bytes.size() - 1u] == (f32 ? 1u : 0u));
+            const auto replay = serializer.Deserialize(encoded);
+            Require(replay.request.target.fmaFloat16 == f16 && replay.request.target.fmaFloat32 == f32);
+            Require(serializer.Serialize(replay.request) == encoded);
+            auto legacy62 = bytes;
+            legacy62.resize(legacy62.size() - 2u);
+            legacy62[4] = 62u;
+            const auto replay62 = serializer.Deserialize(EncodeBase64(legacy62));
+            Require(!replay62.request.target.fmaFloat16 && !replay62.request.target.fmaFloat32);
+        }
+    }
+}
+
 int main() {
     VerifyTargetOptions();
+    VerifyFmaOptions();
     return VerifyVersion56Compatibility();
 }
