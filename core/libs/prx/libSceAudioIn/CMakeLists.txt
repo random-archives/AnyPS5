@@ -46,3 +46,13 @@ if(BUILD_TESTING)
             "PATH=path_list_prepend:$<TARGET_FILE_DIR:libSceAudioIn>")
     endif()
 endif()
+
+    add_test_executable(guest_audio_in_port_config_gain_status_tests ${LIBS_INCLUDE_DIR}/tests/GuestAudioInPortConfigGainStatus.cpp)
+    target_include_directories(guest_audio_in_port_config_gain_status_tests PRIVATE ${LIBS_INCLUDE_DIR})
+    target_link_libraries(guest_audio_in_port_config_gain_status_tests PRIVATE libSceAudioIn libc)
+    configure_windows_unwind(guest_audio_in_port_config_gain_status_tests)
+    add_test(NAME guest_audio_in_port_config_gain_status COMMAND guest_audio_in_port_config_gain_status_tests)
+    if(WIN32)
+        set_tests_properties(guest_audio_in_port_config_gain_status PROPERTIES ENVIRONMENT_MODIFICATION
+            "PATH=path_list_prepend:$<TARGET_FILE_DIR:libSceAudioIn>")
+    endif()
