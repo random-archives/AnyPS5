@@ -19,6 +19,7 @@ constexpr std::size_t SwitchCount = static_cast<std::size_t>(RuntimeSwitch::Coun
 constexpr std::array<const char*, SwitchCount> SwitchNames{
     "APS5_NO_BARRIER_BATCH",
     "APS5_NO_GUARD_SPANS",
+    "APS5_ARM_RESIDENT",
     "APS5_NO_OWNED_DRAW_INPUTS",
     "APS5_NO_PASS_ATTACHMENT_MEMO",
     "APS5_NO_IMPORT_SEGMENT_MEMO",
@@ -31,6 +32,7 @@ constexpr std::array<const char*, SwitchCount> SwitchNames{
     "APS5_DRAW_TABLE_SNAPSHOT",
     "APS5_NO_TARGET_MEMO",
     "APS5_NO_TARGET_MEMO_OVERLAP_CACHE",
+    "APS5_ARM_BLOCKS",
 };
 
 struct SwitchValues {
@@ -39,6 +41,7 @@ struct SwitchValues {
         const std::array<bool, SwitchCount> environment{
             std::getenv("APS5_NO_BARRIER_BATCH") != nullptr,
             std::getenv("APS5_NO_GUARD_SPANS") != nullptr,
+            std::getenv("APS5_ARM_RESIDENT") != nullptr,
             std::getenv("APS5_NO_OWNED_DRAW_INPUTS") != nullptr,
             std::getenv("APS5_NO_PASS_ATTACHMENT_MEMO") != nullptr,
             std::getenv("APS5_NO_IMPORT_SEGMENT_MEMO") != nullptr,
@@ -51,6 +54,7 @@ struct SwitchValues {
             std::getenv("APS5_DRAW_TABLE_SNAPSHOT") != nullptr,
             std::getenv("APS5_NO_TARGET_MEMO") != nullptr,
             std::getenv("APS5_NO_TARGET_MEMO_OVERLAP_CACHE") != nullptr,
+            std::getenv("APS5_ARM_BLOCKS") != nullptr,
         };
         for (std::size_t index = 0; index < SwitchCount; ++index) set[index].store(environment[index], std::memory_order_relaxed);
     }
