@@ -4505,6 +4505,7 @@ bool ShaderResources::Revalidate(std::span<const CompiledShader> shaders, ProofR
         provedEpoch = 0;
         return false;
     }
+    requireGuestBuffers();
     if (EpochProofs()) {
         const auto epoch = GuestMemory::CollectEpoch();
         const auto proof = GuestMemory::ProofSerial();
