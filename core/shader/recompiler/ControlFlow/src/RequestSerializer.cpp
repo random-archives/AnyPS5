@@ -916,7 +916,7 @@ std::string RequestSerializer::Serialize(const RecompileRequest& request) const 
     std::string buffer;
     Writer writer(buffer);
     writer.WriteU32(0x41505335u);
-    writer.WriteU32(62u);
+    writer.WriteU32(63u);
     writeShaderBinary(writer, request.shader);
     writeGuestContext(writer, request.context);
     writeSpirvTarget(writer, request.target);
@@ -970,6 +970,10 @@ std::string RequestSerializer::Serialize(const RecompileRequest& request) const 
     writer.WriteU32(request.target.maxImageArrayLayers);
     writer.WriteBool(request.target.fixedPushSlots);
     writer.WriteBool(request.target.spannedAnySubgroup);
+    if (request.graphics.has_value() && request.graphics->mesh.has_value()) {
+        writer.WriteU32(request.graphics->mesh->reuseVertexLimit);
+        writer.WriteU32(request.graphics->mesh->reusePrimitiveLimit);
+    }
     return base64Encode(buffer);
 }
 
@@ -978,7 +982,7 @@ DeserializedRequest RequestSerializer::Deserialize(std::string_view text) const 
     Reader reader(decoded);
     if (reader.ReadU32() != 0x41505335u) throw std::runtime_error("invalid recompile request signature");
     const auto version = reader.ReadU32();
-    if (version < 1u || version > 62u || version == 50u || (version >= 58u && version <= 61u)) throw std::runtime_error("unsupported recompile request serialization version");
+    if (version < 1u || version > 63u || version == 50u || (version >= 58u && version <= 61u)) throw std::runtime_error("unsupported recompile request serialization version");
     DeserializedRequest result{};
     result.request.shader = readShaderBinary(reader, result.shaderCode, result.shaderHeader);
     result.request.context = readGuestContext(reader, result, version);
@@ -1054,6 +1058,10 @@ DeserializedRequest RequestSerializer::Deserialize(std::string_view text) const 
         result.request.target.fixedPushSlots = reader.ReadBool();
     }
     if (version >= 62u) result.request.target.spannedAnySubgroup = reader.ReadBool();
+    if (version >= 63u && result.request.graphics.has_value() && result.request.graphics->mesh.has_value()) {
+        result.request.graphics->mesh->reuseVertexLimit = reader.ReadU32();
+        result.request.graphics->mesh->reusePrimitiveLimit = reader.ReadU32();
+    }
     if (version >= 21u && reader.Remaining() != 0u) throw std::runtime_error("RequestSerializer: unexpected trailing data");
     return result;
 }
