@@ -8924,10 +8924,6 @@ int APS5_VABI _ZNK7WebCore27TranslateTransformOperation5cloneEv() {
     NotImplemented_nid_no_patch(__func__);
 }
 
-int APS5_VABI WKPageCanDelete() {
-    NotImplemented_nid_no_patch(__func__);
-}
-
 
 int APS5_VABI WKUserContentExtensionStoreRemove() {
     NotImplemented_nid_no_patch(__func__);
@@ -10045,10 +10041,6 @@ int APS5_VABI WKPageGetAllowsRemoteInspection() {
 }
 
 
-int APS5_VABI WKPageGetBackingScaleFactor() {
-    NotImplemented_nid_no_patch(__func__);
-}
-
 int APS5_VABI WKPageGetBytecodeProfile() {
     NotImplemented_nid_no_patch(__func__);
 }
@@ -10070,14 +10062,6 @@ int APS5_VABI WKPageGetImageForFindMatch() {
     NotImplemented_nid_no_patch(__func__);
 }
 
-int APS5_VABI WKPageGetIsControlledByAutomation() {
-    NotImplemented_nid_no_patch(__func__);
-}
-
-
-int APS5_VABI WKPageGetMediaCaptureEnabled() {
-    NotImplemented_nid_no_patch(__func__);
-}
 
 int APS5_VABI WKPageGetMediaState() {
     NotImplemented_nid_no_patch(__func__);
@@ -10094,19 +10078,7 @@ int APS5_VABI WKPageGetSamplingProfilerOutput() {
     NotImplemented_nid_no_patch(__func__);
 }
 
-int APS5_VABI WKPageGetScaleFactor() {
-    NotImplemented_nid_no_patch(__func__);
-}
-
 int APS5_VABI WKPageGetSelectionAsWebArchiveData() {
-    NotImplemented_nid_no_patch(__func__);
-}
-
-int APS5_VABI WKPageGetSessionBackForwardListItemValueType() {
-    NotImplemented_nid_no_patch(__func__);
-}
-
-int APS5_VABI WKPageGetSessionHistoryURLValueType() {
     NotImplemented_nid_no_patch(__func__);
 }
 
@@ -10142,19 +10114,7 @@ int APS5_VABI WKPageHandleWheelEvent() {
     NotImplemented_nid_no_patch(__func__);
 }
 
-int APS5_VABI WKPageHasSelectedRange() {
-    NotImplemented_nid_no_patch(__func__);
-}
-
 int APS5_VABI WKPageHideFindUI() {
-    NotImplemented_nid_no_patch(__func__);
-}
-
-int APS5_VABI WKPageIsContentEditable() {
-    NotImplemented_nid_no_patch(__func__);
-}
-
-int APS5_VABI WKPageIsPlayingAudio() {
     NotImplemented_nid_no_patch(__func__);
 }
 
@@ -10310,14 +10270,6 @@ int APS5_VABI WKPageSetCaretVisible() {
     NotImplemented_nid_no_patch(__func__);
 }
 
-int APS5_VABI WKPageSetControlledByAutomation() {
-    NotImplemented_nid_no_patch(__func__);
-}
-
-int APS5_VABI WKPageSetCustomBackingScaleFactor() {
-    NotImplemented_nid_no_patch(__func__);
-}
-
 int APS5_VABI WKPageSetIgnoresViewportScaleLimits() {
     NotImplemented_nid_no_patch(__func__);
 }
@@ -10327,10 +10279,6 @@ int APS5_VABI WKPageSetMaintainsInactiveSelection() {
 }
 
 int APS5_VABI WKPageSetMayStartMediaWhenInWindow() {
-    NotImplemented_nid_no_patch(__func__);
-}
-
-int APS5_VABI WKPageSetMediaCaptureEnabled() {
     NotImplemented_nid_no_patch(__func__);
 }
 
@@ -10390,15 +10338,7 @@ int APS5_VABI WKPageSetPageUIClient() {
     NotImplemented_nid_no_patch(__func__);
 }
 
-int APS5_VABI WKPageSetScaleFactor() {
-    NotImplemented_nid_no_patch(__func__);
-}
-
 int APS5_VABI WKPageStopLoading() {
-    NotImplemented_nid_no_patch(__func__);
-}
-
-int APS5_VABI WKPageSupportsTextEncoding() {
     NotImplemented_nid_no_patch(__func__);
 }
 
