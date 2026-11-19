@@ -80,4 +80,7 @@
 #include "prx/libSceNKWebKit/include/CrossOriginRequestExports.hpp"
 #include "prx/libSceNKWebKit/include/BlobDataFileReferenceExports.hpp"
 #include "prx/libSceNKWebKit/include/HtmlSpaceTrimExports.hpp"
+#include "prx/libSceNKWebKit/include/IsoBoxParsingExports.hpp"
+#include "prx/libSceNKWebKit/include/IsoProtectionBoxExports.hpp"
+#include "prx/libSceNKWebKit/include/IsoSchemeBoxExports.hpp"
 #include "prx/libSceNKWebKit/include/BmallocIsoHeapExports.hpp"
