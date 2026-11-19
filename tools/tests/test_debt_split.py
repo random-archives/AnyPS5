@@ -580,12 +580,25 @@ class DebtSplitTests(unittest.TestCase):
 
     def test_separated_puts_a_blank_between_entries_and_text(self):
         self.assertEqual(debt_split.separated(["- a", "- b", "text"]), ["- a", "- b", "", "text"])
+class RelinkUnfencedTests(unittest.TestCase):
+    def test_relink_unfenced_rewrites_relative_links_and_keeps_urls(self):
+        text = "see [x](../img/x.png) and [y](https://example.com/a) and [z](#anchor)"
+        moved = debt_split.relink_unfenced(text, "docs/dev/a.md", "docs/dev/debt/b.md")
+        self.assertIn("[x](../../img/x.png)", moved)
+        self.assertIn("[y](https://example.com/a)", moved)
+        self.assertIn("[z](../a.md#anchor)", moved)
 
 
     def test_render_index_separates_headings_and_text_and_ends_with_one_newline(self):
         index = [("heading", "# T"), ("text", "note"), ("heading", "### S"), ("entry", "- a"), ("entry", "- b")]
         self.assertEqual(debt_split.render_index(index), "# T\n\nnote\n\n### S\n\n- a\n- b\n")
         self.assertEqual(debt_split.render_index([("entry", "- a"), ("entry", "- b")]), "- a\n- b\n")
+
+
+class RenderTests(unittest.TestCase):
+    def test_render_orders_sections_and_separates_entries(self):
+        out = debt_split.render("# T", {"B": ["- b"], "A": ["- a"]}, ["A", "B"])
+        self.assertEqual(out, "# T\n\n### A\n\n- a\n\n### B\n\n- b\n")
 
 
 if __name__ == "__main__":
