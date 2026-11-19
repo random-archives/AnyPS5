@@ -1,11 +1,26 @@
 #include "FontFixture.hpp"
 #include "prx/libSceFontFt/include/Api.hpp"
 #include "prx/libSceFont/include/Api.hpp"
+#include "prx/libSceFont/include/FontDriver.hpp"
 #include <cerrno>
+#include <cstddef>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
 #include <vector>
+#ifdef _WIN32
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+#else
+#include <sys/mman.h>
+#include <unistd.h>
+#endif
 
 static void Check(bool value, int line) {
     if (!value) {
@@ -21,6 +36,28 @@ static void* APS5_VABI Allocate(void*, std::uint32_t size) {
 
 static void APS5_VABI Release(void*, void* pointer) {
     std::free(pointer);
+}
+
+static const Font::SysDriver* DriverWithUnreadableTerm(const Font::SysDriver* driver) {
+    constexpr std::size_t readable = offsetof(Font::SysDriver, term);
+#ifdef _WIN32
+    SYSTEM_INFO info{};
+    GetSystemInfo(&info);
+    const std::size_t page = info.dwPageSize;
+    auto* base = static_cast<unsigned char*>(VirtualAlloc(nullptr, page * 2, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE));
+    Require(base != nullptr);
+    DWORD previous = 0;
+    Require(VirtualProtect(base + page, page, PAGE_NOACCESS, &previous) != 0);
+#else
+    const auto page = static_cast<std::size_t>(sysconf(_SC_PAGESIZE));
+    void* mapped = mmap(nullptr, page * 2, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+    Require(mapped != MAP_FAILED);
+    auto* base = static_cast<unsigned char*>(mapped);
+    Require(mprotect(base + page, page, PROT_NONE) == 0);
+#endif
+    unsigned char* copy = base + page - readable;
+    std::memcpy(copy, driver, readable);
+    return reinterpret_cast<const Font::SysDriver*>(copy);
 }
 
 static std::vector<unsigned char> BuildCharacterFont() {
@@ -41,6 +78,35 @@ int main() {
     errno = 71;
     Require(sceFontCreateLibrary(nullptr, sceFontSelectLibraryFt(0), unmappedLibrary) == SCE_FONT_ERROR_INVALID_PARAMETER);
     Require(errno == 71);
+
+    const auto* const unmappedMemory = reinterpret_cast<const FontMemory*>(0x10);
+    FontMemory unmappedInterface = memory;
+    unmappedInterface.iface = reinterpret_cast<const FontMemoryInterface*>(0x10);
+    const void* const unmappedParams = reinterpret_cast<const void*>(0x10);
+    FontLibrary rejectedLibrary = nullptr;
+    errno = 71;
+    Require(sceFontCreateLibraryWithEdition(unmappedMemory, sceFontSelectLibraryFt(0), 0, &rejectedLibrary) == SCE_FONT_ERROR_INVALID_MEMORY);
+    Require(errno == 71 && rejectedLibrary == nullptr);
+    errno = 71;
+    Require(sceFontCreateLibraryWithEdition(&unmappedInterface, sceFontSelectLibraryFt(0), 0, &rejectedLibrary) == SCE_FONT_ERROR_INVALID_MEMORY);
+    Require(errno == 71 && rejectedLibrary == nullptr);
+    errno = 71;
+    Require(sceFontCreateLibraryWithEdition(&memory, unmappedParams, 0, &rejectedLibrary) == SCE_FONT_ERROR_INVALID_PARAMETER);
+    Require(errno == 71 && rejectedLibrary == nullptr);
+    errno = 71;
+    Require(sceFontCreateLibraryWithEdition(&memory, DriverWithUnreadableTerm(sceFontSelectLibraryFt(0)), 0, &rejectedLibrary) == SCE_FONT_ERROR_INVALID_PARAMETER);
+    Require(errno == 71 && rejectedLibrary == nullptr);
+    FontRenderer rejectedRenderer = nullptr;
+    errno = 71;
+    Require(sceFontCreateRendererWithEdition(unmappedMemory, sceFontSelectRendererFt(0), 0, &rejectedRenderer) == SCE_FONT_ERROR_INVALID_MEMORY);
+    Require(errno == 71 && rejectedRenderer == nullptr);
+    errno = 71;
+    Require(sceFontCreateRendererWithEdition(&unmappedInterface, sceFontSelectRendererFt(0), 0, &rejectedRenderer) == SCE_FONT_ERROR_INVALID_MEMORY);
+    Require(errno == 71 && rejectedRenderer == nullptr);
+    errno = 71;
+    Require(sceFontCreateRendererWithEdition(&memory, unmappedParams, 0, &rejectedRenderer) == SCE_FONT_ERROR_INVALID_PARAMETER);
+    Require(errno == 71 && rejectedRenderer == nullptr);
+
     FontLibrary library = nullptr;
     Require(sceFontCreateLibrary(&memory, sceFontSelectLibraryFt(0), &library) == SCE_FONT_OK && library != nullptr);
     FontRenderer renderer = nullptr;
