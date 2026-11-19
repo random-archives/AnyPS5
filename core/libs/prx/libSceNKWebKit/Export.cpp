@@ -11452,10 +11452,6 @@ int APS5_VABI _ZN3JSC15WeakHandleOwnerC2Ev() {
     NotImplemented_nid_no_patch(__func__);
 }
 
-int APS5_VABI _ZN3JSC15WeakHandleOwnerD0Ev() {
-    NotImplemented_nid_no_patch(__func__);
-}
-
 int APS5_VABI _ZN3JSC15constructNumberEPNS_14JSGlobalObjectENS_7JSValueE() {
     NotImplemented_nid_no_patch(__func__);
 }
@@ -11920,10 +11916,6 @@ int APS5_VABI _ZN3JSC19numberOfDFGCompilesEPK15OpaqueJSContextPK13OpaqueJSValue(
 }
 
 int APS5_VABI _ZN3JSC19reifyStaticAccessorERNS_2VMERKNS_14HashTableValueERNS_8JSObjectENS_12PropertyNameE() {
-    NotImplemented_nid_no_patch(__func__);
-}
-
-int APS5_VABI _ZN3JSC20TypedArrayControllerD0Ev() {
     NotImplemented_nid_no_patch(__func__);
 }
 
