@@ -64,6 +64,7 @@ public:
     CommandState& operator=(const CommandState&) = delete;
 
     void Begin(VkCommandBuffer commands, bool suppress = true);
+    void Continue(VkCommandBuffer commands);
     void Invalidate() noexcept;
     VkCommandBuffer Commands() const { return commands; }
     bool Known(Slot slot) const { return (valid & Mask(slot)) != 0; }
@@ -179,8 +180,13 @@ public:
     void AfterRun(std::function<void(Recorder&)> work);
     bool CloseRunOwing(const void* owner);
     struct OverlapStatistics {
-        std::uint64_t deferred, overlapped, flushed;
+        std::uint64_t deferred, overlapped, flushed, preludeDispatches;
     };
+    static bool BatchedStagingEnabled();
+    VkCommandBuffer SplitForRun();
+    VkCommandBuffer PreludeCommands();
+    bool AfterRunMerging() const { return open != nullptr && open->afterRunMerging; }
+    bool AfterRunWrite(std::uint64_t begin, std::uint64_t end);
     static OverlapStatistics OverlapCounts();
     struct DrawPassStart {
         VkCommandBuffer commands = VK_NULL_HANDLE;
@@ -844,6 +850,12 @@ private:
         std::vector<const void*> deferredRun;
         std::vector<RunAccess> runAccess;
         std::vector<std::function<void(Recorder&)>> afterRun;
+        std::vector<VkCommandBuffer> chunks;
+        bool preludeArmed = false;
+        VkCommandBuffer prelude = VK_NULL_HANDLE;
+        bool afterRunMerging = false;
+        bool afterRunWrote = false;
+        std::vector<std::pair<std::uint64_t, std::uint64_t>> afterRunWritten;
         // The hazard tracker's accesses since its last simulated barrier (see NoteAccess).
         struct Tracker {
             struct Range {
@@ -975,6 +987,9 @@ private:
     void ensureOpen();
     void flushDeferredDispatch();
     bool runConflict(std::span<const RunAccess> accesses) const;
+    VkCommandBuffer beginChunk();
+    void sealPrelude();
+    std::vector<VkCommandBuffer> spareChunks;
     bool joinsRun(std::uint32_t queueKey, std::span<const void* const> owners, std::span<const RunAccess> accesses) const;
     void dropStaleHoldKept();
     // Records the run's pending store (vkCmdUpdateBuffer), if any.
