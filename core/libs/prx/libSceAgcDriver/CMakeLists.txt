@@ -1145,4 +1145,6 @@ if(BUILD_TESTING)
     endif()
 endif()
 
+include(tests/cmake/agc_decoder_reference_forms_tests.cmake)
+
 target_sources(agc_driver_scattered_runs_tests PRIVATE tests/AllocationFailure.cpp)
