@@ -185,6 +185,7 @@ struct CachedTexture {
     std::shared_ptr<Texture> texture;
     // A fast-cleared surface is cached as its clear texels; it stays valid while the keys are unchanged.
     DccKeys keys = DccKeys::Uncompressed;
+    std::uint64_t mixedSignature = 0;
     // Write generation the snapshot is known current at (see GuestMemory::CollectWrites).
     std::uint64_t generation = 0;
     // A texture viewing a storage image on the GPU has no snapshot; it stays valid while that image
@@ -574,6 +575,7 @@ struct LookupRecord {
     std::uint64_t generation;
     const StorageTexture* source;
     bool depth = false;
+    std::uint64_t mixedSignature = 0;
     std::uint64_t committedGeneration = 0;
     std::vector<std::pair<std::uint64_t, std::uint64_t>> committed;
 };
@@ -955,6 +957,19 @@ bool equalsCommittedSlabs(std::uint64_t address, const CommittedSlabs& slabs, st
     return true;
 }
 
+bool equalsCommittedMixed(const GuestTextureResource& resource, std::uint64_t guestBytes, std::uint64_t mixedSignature, std::span<const std::byte> bytes) {
+    const auto mixed = MixedKeyClearRuns(resource, guestBytes);
+    if (!mixed.has_value() || mixed->signature != mixedSignature) return false;
+    std::size_t pos = 0;
+    for (const auto& [first, last] : mixed->runs) {
+        const auto runBegin = std::min<std::size_t>(first * 256u, bytes.size());
+        const auto runEnd = std::min<std::size_t>(last * 256u, bytes.size());
+        if (pos < runBegin && !GuestMemory::EqualsCommitted(resource.baseAddress + pos, bytes.subspan(pos, runBegin - pos))) return false;
+        pos = std::max(pos, runEnd);
+    }
+    return pos >= bytes.size() || GuestMemory::EqualsCommitted(resource.baseAddress + pos, bytes.subspan(pos));
+}
+
 void reportCommittedSlabs(const GuestTextureResource& resource, const CommittedSlabs& slabs, std::uint64_t guestBytes) {
     static std::atomic<std::uint64_t> views{0};
     const auto count = views.fetch_add(1) + 1;
@@ -986,6 +1001,8 @@ PendingLookup pendingLookupSource(const Context& context, const GuestTextureReso
     if (source != nullptr && MetadataMoved(*source, resource)) source.reset();
     return lookup;
 }
+
+bool SameKeySurface(const StorageTexture* source, const GuestTextureResource& resource, std::uint64_t guestBytes);
 
 // `guestBytes` is the surface size when the caller described the surface already (0: described here).
 std::shared_ptr<Texture> cachedTexture(const Context& context, std::span<const std::uint32_t> words, const GuestTextureResource& requested, VkComponentMapping components, std::uint64_t guestBytes = 0, bool depthCompare = false, VkImageViewType multisampleViewType = VK_IMAGE_VIEW_TYPE_2D, bool layerRows = false) {
@@ -1035,7 +1052,8 @@ std::shared_ptr<Texture> cachedTexture(const Context& context, std::span<const s
         const auto window = ViewedArrayWindow(resource, false);
         if (window.baseAddress != resource.baseAddress || resource.dccAddress == 0) return window;
         if (ViewedArrayWindow(resource, true).baseAddress == resource.baseAddress) return window;
-        if (TextureClearKeys(resource, guestBytes != 0 ? guestBytes : SurfaceGuestBytes(resource)) != DccKeys::Uncompressed) return window;
+        const auto state = TextureClearKeyState(resource, guestBytes != 0 ? guestBytes : SurfaceGuestBytes(resource));
+        if (state.keys != DccKeys::Uncompressed || state.mixedSignature != 0) return window;
         return ViewedArrayWindow(resource, true);
     };
     if (const auto window = viewedWindow(); window.baseAddress != resource.baseAddress) {
@@ -1056,11 +1074,11 @@ std::shared_ptr<Texture> cachedTexture(const Context& context, std::span<const s
     static const bool disabled = std::getenv("APS5_NO_TEXTURE_CACHE") != nullptr;
     const bool profile = LookupOutcomes::Profiled();
     const auto start = profile ? std::chrono::steady_clock::now() : std::chrono::steady_clock::time_point{};
-    std::optional<DccKeys> scanned;
+    std::optional<DccKeyState> scanned;
     const auto scanKeys = [&] {
         if (scanned.has_value()) return *scanned;
         if (resource.dccAddress == 0) {
-            scanned = DccKeys::Uncompressed;
+            scanned = DccKeyState{};
             return *scanned;
         }
         const auto scanStart = profile ? std::chrono::steady_clock::now() : std::chrono::steady_clock::time_point{};
@@ -1074,7 +1092,7 @@ std::shared_ptr<Texture> cachedTexture(const Context& context, std::span<const s
         }
         const auto scans = KeyProofCounts().scanned;
         const auto proofs = KeyProofCounts().proved;
-        scanned = ProvedClearKeys(resource, guestBytes, memo.proof);
+        scanned = ProvedClearKeyState(resource, guestBytes, memo.proof);
         if (KeyProofCounts().scanned != scans) ++sampledLookupKeyScans;
         if (KeyProofCounts().proved != proofs) ++sampledLookupKeyProofs;
         if (profile) LookupOutcomes::Add(LookupOutcomes::DccScan, scanStart);
@@ -1092,25 +1110,27 @@ std::shared_ptr<Texture> cachedTexture(const Context& context, std::span<const s
     const bool srgbExpand = lookup.srgbExpand;
     auto source = std::move(lookup.source);
     const bool blockCopy = lookup.blockCopy;
-    std::optional<DccKeys> keys;
+    std::optional<DccKeyState> keys;
     bool clearThroughKeys = false;
     if (source != nullptr && resource.dccAddress != 0 && IsDccClear(source->FilledKeys())) {
         keys = scanKeys();
-        if (*keys == source->FilledKeys()) {
+        if (keys->keys == source->FilledKeys() && keys->mixedSignature == 0) {
             std::array<std::byte, 16> probe{};
-            if (!FillDccClear(DccClearTextureFormat(resource.format), *keys, resource.dccAlphaOnMsb, probe)) {
+            if (!FillDccClear(DccClearTextureFormat(resource.format), keys->keys, resource.dccAlphaOnMsb, probe)) {
                 char text[256];
-                std::snprintf(text, sizeof(text), "AGC graphics: sampled texture 0x%llx (%ux%u format %u, dcc 0x%llx) reads %s DCC keys filled over its pending image, a clear value the format has no encoding for", static_cast<unsigned long long>(resource.baseAddress), resource.width, resource.height, resource.format, static_cast<unsigned long long>(resource.dccAddress), DccKeysName(*keys));
+                std::snprintf(text, sizeof(text), "AGC graphics: sampled texture 0x%llx (%ux%u format %u, dcc 0x%llx) reads %s DCC keys filled over its pending image, a clear value the format has no encoding for", static_cast<unsigned long long>(resource.baseAddress), resource.width, resource.height, resource.format, static_cast<unsigned long long>(resource.dccAddress), DccKeysName(keys->keys));
                 throw std::runtime_error(text);
             }
             static const bool traceKeys = std::getenv("APS5_TRACE_DCC_KEYS") != nullptr;
-            if (traceKeys) std::fprintf(stderr, "[dcc-keys] sampled 0x%llx through keys 0x%llx reads the %s fill, not the pending image\n", static_cast<unsigned long long>(address), static_cast<unsigned long long>(resource.dccAddress), DccKeysName(*keys));
+            if (traceKeys) std::fprintf(stderr, "[dcc-keys] sampled 0x%llx through keys 0x%llx reads the %s fill, not the pending image\n", static_cast<unsigned long long>(address), static_cast<unsigned long long>(resource.dccAddress), DccKeysName(keys->keys));
             source.reset();
             clearThroughKeys = true;
         }
     }
-    if (source != nullptr && resource.dccAddress != 0 && (keys.has_value() ? *keys : scanKeys()) == DccKeys::ClearSingle) source.reset();
-    if (source != nullptr && resource.dccAddress != 0 && source->Descriptor().dccAddress != resource.dccAddress && (keys.has_value() ? IsDccClear(*keys) : IsDccClear(scanKeys()))) source.reset();
+    if (source != nullptr && resource.dccAddress != 0) {
+        const auto observedKeys = keys.has_value() ? *keys : scanKeys();
+        if (observedKeys.keys == DccKeys::ClearSingle || (source->Descriptor().dccAddress != resource.dccAddress && (IsDccClear(observedKeys.keys) || observedKeys.mixedSignature != 0))) source.reset();
+    }
 
     // Otherwise a surface in host-imported memory is viewed through its cached storage image (made
     // here when there is none): its refresh after a CPU or GPU write is a GPU-direct detile from the
@@ -1120,11 +1140,11 @@ std::shared_ptr<Texture> cachedTexture(const Context& context, std::span<const s
     if ((!depthCompare || depthCopy) && !layerRows && source == nullptr && !clearThroughKeys && SampledFromStorageEligible(context, resource, guestBytes)) {
 
         keys = scanKeys();
-        if (*keys == DccKeys::Uncompressed) {
+        if (keys->keys == DccKeys::Uncompressed) {
             source = sampledStorageSource(context, resource, guestBytes);
             if (source != nullptr && depthCompare && !Texture::CanDepthCopyFrom(*source, resource)) source.reset();
             if (source != nullptr && srgbExpand && !Texture::CanSrgbExpandFrom(context, *source, resource)) source.reset();
-        } else if (!depthCompare && ClearedViewEnabled() && StorageClearAvailable(context, resource.format, *keys)) {
+        } else if (!depthCompare && ClearedViewEnabled() && StorageClearAvailable(context, resource.format, keys->keys)) {
             // A fast-cleared surface is viewed as well, through its image cleared on the GPU (the
             // lookup's Refresh, see StorageTexture::upload), when the image's own descriptor names
             // the same DCC metadata so the refresh sees the keys. A snapshot of the clear texels
@@ -1158,7 +1178,7 @@ std::shared_ptr<Texture> cachedTexture(const Context& context, std::span<const s
     const auto flushStart = profile ? std::chrono::steady_clock::now() : std::chrono::steady_clock::time_point{};
     const bool stagedClear = source != nullptr && source->AnyLayerPending() && resource.dccAddress != 0 && source->Descriptor().dccAddress == resource.dccAddress && [&] {
         const auto observedKeys = keys.has_value() ? *keys : scanKeys();
-        return IsDccClear(observedKeys) || observedKeys == DccKeys::ClearSingle;
+        return IsDccClear(observedKeys.keys) || observedKeys.keys == DccKeys::ClearSingle;
     }();
     bool stagedFlushed = false;
     const bool flushAsked = (source == nullptr || stagedClear) && !clearThroughKeys;
@@ -1167,7 +1187,7 @@ std::shared_ptr<Texture> cachedTexture(const Context& context, std::span<const s
         generation = GuestMemory::CollectWrites(address, bytes);
         if (stagedClear) {
             stagedFlushed = true;
-            keys = DccKeys::Uncompressed;
+            keys = DccKeyState{DccKeys::Uncompressed, 0};
         } else {
             keys.reset();
         }
@@ -1175,7 +1195,7 @@ std::shared_ptr<Texture> cachedTexture(const Context& context, std::span<const s
     }
     if (flushAsked) scanned.reset();
     if (!keys.has_value()) keys = scanKeys();
-    const bool slabbed = source == nullptr && generation == 0 && *keys == DccKeys::Uncompressed && resource.dccAddress == 0 && !depthCompare && !srgbExpand && resource.dimension == TextureDimension::k3D;
+    const bool slabbed = source == nullptr && generation == 0 && keys->keys == DccKeys::Uncompressed && keys->mixedSignature == 0 && resource.dccAddress == 0 && !depthCompare && !srgbExpand && resource.dimension == TextureDimension::k3D;
     if (disabled) {
         if (source != nullptr && depthCompare) {
             auto texture = std::make_shared<Texture>(context, source, resource, components, Texture::DepthCopyTag{});
@@ -1198,11 +1218,11 @@ std::shared_ptr<Texture> cachedTexture(const Context& context, std::span<const s
             return texture;
         }
         if (source != nullptr) return std::make_shared<Texture>(context, source, resource, components);
-        if (const auto clear = SampledClearColor(context, resource, *keys, depthCompare)) return std::make_shared<Texture>(context, *context.detiler, resource, components, std::span<const std::byte>{}, false, layerRows, &*clear);
+        if (const auto clear = SampledClearColor(context, resource, keys->keys, depthCompare)) return std::make_shared<Texture>(context, *context.detiler, resource, components, std::span<const std::byte>{}, false, layerRows, &*clear);
         const auto slabs = slabbed ? committedSlabs(resource, guestBytes, std::nullopt) : std::nullopt;
         if (slabs.has_value()) reportCommittedSlabs(resource, *slabs, guestBytes);
         std::vector<std::byte> snapshot(snapshotBytes(slabs, bytes));
-        readSnapshot(resource, *keys, slabs, snapshot);
+        readSnapshot(resource, keys->keys, slabs, snapshot);
         return std::make_shared<Texture>(context, *context.detiler, resource, components, snapshot, depthCompare, layerRows, nullptr, packedSlabs(slabs));
     }
     auto snapshotGeneration = generation;
@@ -1214,7 +1234,7 @@ std::shared_ptr<Texture> cachedTexture(const Context& context, std::span<const s
             committed = std::move(ranges);
         }
     }
-    const auto untracked = source == nullptr && generation == 0 && !committed.has_value() && *keys == DccKeys::Uncompressed ? untrackedKey(address, bytes) : std::array<std::uint64_t, 4>{};
+    const auto untracked = source == nullptr && generation == 0 && !committed.has_value() && keys->keys == DccKeys::Uncompressed && keys->mixedSignature == 0 ? untrackedKey(address, bytes) : std::array<std::uint64_t, 4>{};
     auto slabs = slabbed ? committedSlabs(resource, guestBytes, committed) : std::nullopt;
     const auto snapshotSize = snapshotBytes(slabs, bytes);
     auto& cache = Textures();
@@ -1228,17 +1248,18 @@ std::shared_ptr<Texture> cachedTexture(const Context& context, std::span<const s
             // The view follows the storage image, whatever the GPU wrote to it since; guest memory
             // written meanwhile is taken in by refreshing the image. A fast clear the image cannot
             // see (keys, and no pending results to prefer) ends the view: a snapshot holds the clear.
-            if (!stagedFlushed && (source == nullptr || source == it->source) && (source != nullptr || *keys == DccKeys::Uncompressed) && StorageImageServesKeys(*it->source, resource.dccAddress)) {
-                if (!GuestMemory::UnchangedSince(address, bytes, it->source->GenerationFor(address, bytes))) refreshForView(*it->source, resource);
+            if (!stagedFlushed && (source == nullptr || source == it->source) && (source != nullptr || keys->keys == DccKeys::Uncompressed) && StorageImageServesKeys(*it->source, resource.dccAddress)) {
+                if (!GuestMemory::UnchangedSince(address, bytes, it->source->GenerationFor(address, bytes)) || (SameKeySurface(it->source.get(), resource, guestBytes) && (it->source->UploadedKeys() != keys->keys || it->source->UploadedMixedSignature() != keys->mixedSignature))) refreshForView(*it->source, resource);
                 if (it->texture->IsDepthCopy()) it->texture->RefreshDepthCopy();
-                it->keys = *keys;
+                it->keys = keys->keys;
+                it->mixedSignature = keys->mixedSignature;
                 touchTexture(cache, it);
-                logLookup({it->texture.get(), resource, guestBytes, *keys, 0, it->source.get()});
+                logLookup({it->texture.get(), resource, guestBytes, keys->keys, 0, it->source.get(), false, keys->mixedSignature});
                 reportTextureCounters();
-                if (profile) LookupOutcomes::Add(*keys != DccKeys::Uncompressed ? LookupOutcomes::SampledHitClearedView : LookupOutcomes::SampledHitView, start);
+                if (profile) LookupOutcomes::Add(keys->keys != DccKeys::Uncompressed ? LookupOutcomes::SampledHitClearedView : LookupOutcomes::SampledHitView, start);
                 return it->texture;
             }
-        } else if (source == nullptr && it->surfaceBytes == guestBytes && it->keys == *keys && it->slabs == slabs && stillCommitted(slabs, it->slabs)) {
+        } else if (source == nullptr && it->surfaceBytes == guestBytes && it->keys == keys->keys && it->mixedSignature == keys->mixedSignature && it->slabs == slabs && stillCommitted(slabs, it->slabs)) {
             // Unwritten pages need no comparison; partially resident textures compare only committed
             // pages. The compare goes through the flush hook: it waits for recorded work over the
             // surface (counted, and named for the [hooksync] line).
@@ -1246,7 +1267,9 @@ std::shared_ptr<Texture> cachedTexture(const Context& context, std::span<const s
                 if (it->slabs.has_value() ? it->bytes.size() != snapshotBytes(it->slabs, bytes) : it->bytes.empty()) return false;
                 if (Recorder::SnapshotWriteOverlaps(address, bytes)) counters.pendingReads.fetch_add(1, std::memory_order_relaxed);
                 const GuestMemory::ReadSiteScope site(GuestMemory::ReadSite::TextureCompare);
-                return it->slabs.has_value() ? equalsCommittedSlabs(address, *it->slabs, it->bytes) : GuestMemory::EqualsCommitted(address, it->bytes);
+                if (it->slabs.has_value()) return equalsCommittedSlabs(address, *it->slabs, it->bytes);
+                if (keys->mixedSignature != 0) return equalsCommittedMixed(resource, guestBytes, keys->mixedSignature, it->bytes);
+                return GuestMemory::EqualsCommitted(address, it->bytes);
             };
             const auto unchanged = [&] {
                 if (it->committed != committed) return false;
@@ -1258,12 +1281,12 @@ std::shared_ptr<Texture> cachedTexture(const Context& context, std::span<const s
                 (same ? counters.untrackedKept : counters.untrackedCompared).fetch_add(1, std::memory_order_relaxed);
                 return same;
             };
-            if ((*keys != DccKeys::Uncompressed && *keys != DccKeys::ClearSingle) || unchanged() || kept() || equalsCommitted()) {
+            if ((keys->keys != DccKeys::Uncompressed && keys->keys != DccKeys::ClearSingle) || unchanged() || kept() || equalsCommitted()) {
                 it->generation = snapshotGeneration;
                 it->committed = std::move(committed);
                 it->untracked = untracked;
                 touchTexture(cache, it);
-                LookupRecord record{it->texture.get(), resource, guestBytes, *keys, generation, nullptr};
+                LookupRecord record{it->texture.get(), resource, guestBytes, keys->keys, generation, nullptr, false, keys->mixedSignature};
                 if (generation == 0 && it->committed.has_value()) {
                     record.committedGeneration = snapshotGeneration;
                     record.committed = *it->committed;
@@ -1279,12 +1302,12 @@ std::shared_ptr<Texture> cachedTexture(const Context& context, std::span<const s
         eraseTexture(cache, it);
         ++cache.counts.stale;
     }
-    const auto clear = source == nullptr ? SampledClearColor(context, resource, *keys, depthCompare) : std::nullopt;
+    const auto clear = source == nullptr ? SampledClearColor(context, resource, keys->keys, depthCompare) : std::nullopt;
     static const bool sampledImport = std::getenv("APS5_NO_SAMPLED_IMPORT") == nullptr;
-    const bool gpuWritten = sampledImport && source == nullptr && !clear && !depthCompare && !layerRows && !slabs.has_value() && *keys == DccKeys::Uncompressed && Recorder::SnapshotWriteOverlaps(address, bytes);
+    const bool gpuWritten = sampledImport && source == nullptr && !clear && !depthCompare && !layerRows && !slabs.has_value() && keys->keys == DccKeys::Uncompressed && keys->mixedSignature == 0 && Recorder::SnapshotWriteOverlaps(address, bytes);
     const HostImport* gpuSource = gpuWritten ? ExistingHostImportFor(context, address, bytes) : nullptr;
     if (source != nullptr || clear.has_value() || gpuSource != nullptr) parkSnapshot(cache, recycled);
-    CachedTexture entry{key, address, std::vector<std::byte>{}, nullptr, *keys, snapshotGeneration};
+    CachedTexture entry{key, address, std::vector<std::byte>{}, nullptr, keys->keys, keys->mixedSignature, snapshotGeneration};
     entry.committed = std::move(committed);
     entry.surfaceBytes = bytes;
     entry.slabs = std::move(slabs);
@@ -1322,11 +1345,11 @@ std::shared_ptr<Texture> cachedTexture(const Context& context, std::span<const s
         counters.imported.fetch_add(1, std::memory_order_relaxed);
     } else {
         // Snapshot before the upload so a write racing with it is caught by the next comparison.
-        const bool pending = *keys == DccKeys::Uncompressed && Recorder::SnapshotWriteOverlaps(address, bytes);
+        const bool pending = keys->keys == DccKeys::Uncompressed && Recorder::SnapshotWriteOverlaps(address, bytes);
         if (pending) counters.pendingReads.fetch_add(1, std::memory_order_relaxed);
         if (entry.slabs.has_value()) reportCommittedSlabs(resource, *entry.slabs, guestBytes);
         constexpr std::size_t SnapshotCompareBytes = 256u << 10u;
-        const bool dropped = *keys == DccKeys::Uncompressed && snapshotSize > SnapshotCompareBytes && (entry.generation != 0 || (!pending && untracked[0] != 0));
+        const bool dropped = keys->keys == DccKeys::Uncompressed && snapshotSize > SnapshotCompareBytes && (entry.generation != 0 || (!pending && untracked[0] != 0));
         std::shared_ptr<Buffer> staging;
         if (dropped) {
             parkSnapshot(cache, recycled);
@@ -1337,7 +1360,7 @@ std::shared_ptr<Texture> cachedTexture(const Context& context, std::span<const s
             entry.bytes = recycled.empty() ? std::vector<std::byte>(snapshotSize) : std::move(recycled);
         }
         const auto read = staging != nullptr ? staging->Bytes() : std::span<std::byte>(entry.bytes);
-        readSnapshot(resource, *keys, entry.slabs, read);
+        readSnapshot(resource, keys->keys, entry.slabs, read);
         if (!pending) entry.untracked = untracked;
         static const bool traceTextures = std::getenv("APS5_TRACE_TEXTURES") != nullptr;
         if (traceTextures) {
@@ -1354,7 +1377,7 @@ std::shared_ptr<Texture> cachedTexture(const Context& context, std::span<const s
     const auto budget = sampledBudget(context, cache);
     auto texture = entry.texture;
     const auto madeRecord = [&] {
-        LookupRecord record{texture.get(), resource, guestBytes, *keys, generation, source.get()};
+        LookupRecord record{texture.get(), resource, guestBytes, keys->keys, generation, source.get(), false, keys->mixedSignature};
         if (source == nullptr && generation == 0 && entry.committed.has_value()) {
             record.committedGeneration = entry.generation;
             record.committed = *entry.committed;
@@ -3711,7 +3734,7 @@ void ShaderResources::captureValidation(bool spaceReusable) {
     for (std::size_t i = 0; i < textures.size(); ++i) {
         if (indices[i] == log.size()) continue;
         const auto& found = log[indices[i]];
-        validatedTextures[i] = {found.resource, found.bytes, found.keys, found.generation, 0, found.source, found.depth, true, found.committedGeneration, found.committed};
+        validatedTextures[i] = {found.resource, found.bytes, found.keys, found.mixedSignature, found.generation, 0, found.source, found.depth, true, found.committedGeneration, found.committed};
     }
     lookupLog().clear();
     const auto trim = [](auto& scratch) {
@@ -3840,9 +3863,10 @@ bool ShaderResources::fastRevalidate(std::uint64_t serialBefore, std::span<const
         if (!keyProofs) {
             // Without proofs the keys are compared with the record's (a cleared view's identity
             // below is the record's too): the scan repeats on every call, as before.
-            if (surface.resource.dccAddress != 0 && TextureClearKeys(surface.resource, surface.bytes) != surface.keys) return fail(FastFail::Keys);
-            scannedKeys[i] = surface.keys;
-            if (!unchanged) query(address, address + bytes, source, source != nullptr && surface.keys != DccKeys::Uncompressed ? source : nullptr, {i, false, source != nullptr && surface.keys == DccKeys::Uncompressed});
+            const auto state = surface.resource.dccAddress != 0 ? TextureClearKeyState(surface.resource, surface.bytes) : DccKeyState{};
+            if (state.keys != surface.keys || state.mixedSignature != surface.mixedSignature) return fail(FastFail::Keys);
+            scannedKeys[i] = state.keys;
+            if (!unchanged) query(address, address + bytes, source, source != nullptr && state.keys != DccKeys::Uncompressed ? source : nullptr, {i, false, source != nullptr && state.keys == DccKeys::Uncompressed});
         } else if (source != nullptr) {
             // The view follows its image, so it stays valid while the image would Refresh as
             // unchanged: the image's own keys must be what its content was uploaded under (its
@@ -3850,24 +3874,25 @@ bool ShaderResources::fastRevalidate(std::uint64_t serialBefore, std::span<const
             // since its generation (the query below). The surface's own keys come from the same
             // proof when they are the image's, else from the texture's.
             const auto& own = source->Descriptor();
-            const auto sourceKeys = source->ProvedKeys();
-            if (sourceKeys != source->UploadedKeys()) return fail(FastFail::Keys);
-            const auto keys = surface.resource.dccAddress == 0 ? DccKeys::Uncompressed : SameKeySurface(source, surface.resource, surface.bytes) ? sourceKeys : ProvedClearKeys(surface.resource, surface.bytes, textures[i]->KeyProof());
-            if (surface.resource.dccAddress != 0 && surface.resource.dccAddress != own.dccAddress && (keys != DccKeys::Uncompressed || !StorageImageServesKeys(*source, surface.resource.dccAddress))) return fail(FastFail::Keys);
-            scannedKeys[i] = keys;
+            const auto sourceState = source->ProvedKeyState();
+            if (sourceState.keys != source->UploadedKeys() || sourceState.mixedSignature != source->UploadedMixedSignature()) return fail(FastFail::Keys);
+            const auto state = surface.resource.dccAddress == 0 ? DccKeyState{} : SameKeySurface(source, surface.resource, surface.bytes) ? sourceState : ProvedClearKeyState(surface.resource, surface.bytes, textures[i]->KeyProof());
+            if (surface.resource.dccAddress != 0 && surface.resource.dccAddress != own.dccAddress && (state.keys != DccKeys::Uncompressed || state.mixedSignature != 0 || !StorageImageServesKeys(*source, surface.resource.dccAddress))) return fail(FastFail::Keys);
+            if (state.mixedSignature != surface.mixedSignature) return fail(FastFail::Keys);
+            scannedKeys[i] = state.keys;
             // A view of a fast-cleared surface stays one only while its image still has results
             // pending over it (cachedTexture's hit rule), unless the image's own descriptor names
             // the surface's metadata (the lookup views the cleared image then). The identity is
             // asked whatever the registry's serial did: the keys may have moved since the last
             // proof while the registry did not.
-            if (keys != DccKeys::Uncompressed && !(own.dccAddress == surface.resource.dccAddress && ClearedViewEnabled() && StorageClearAvailable(context, surface.resource.format, keys))) query(address, address + bytes, source, source, {i, false, false});
-            else if (!unchanged) query(address, address + bytes, source, nullptr, {i, false, keys == DccKeys::Uncompressed});
+            if (state.keys != DccKeys::Uncompressed && !(own.dccAddress == surface.resource.dccAddress && ClearedViewEnabled() && StorageClearAvailable(context, surface.resource.format, state.keys))) query(address, address + bytes, source, source, {i, false, false});
+            else if (!unchanged) query(address, address + bytes, source, nullptr, {i, false, state.keys == DccKeys::Uncompressed});
             if (surface.resource.dccAddress != 0 || own.dccAddress != 0) countKeysProven(false);
         } else {
             // A snapshot holds its clear texels or the guest bytes: the keys must be what it was made under.
-            const auto keys = surface.resource.dccAddress != 0 ? ProvedClearKeys(surface.resource, surface.bytes, textures[i]->KeyProof()) : DccKeys::Uncompressed;
-            if (keys != surface.keys) return fail(FastFail::Keys);
-            scannedKeys[i] = keys;
+            const auto state = surface.resource.dccAddress != 0 ? ProvedClearKeyState(surface.resource, surface.bytes, textures[i]->KeyProof()) : DccKeyState{};
+            if (state.keys != surface.keys || state.mixedSignature != surface.mixedSignature) return fail(FastFail::Keys);
+            scannedKeys[i] = state.keys;
             if (!unchanged) query(address, address + bytes, nullptr, nullptr, {i, false, false});
             if (surface.resource.dccAddress != 0) countKeysProven(false);
         }
@@ -3899,7 +3924,8 @@ bool ShaderResources::fastRevalidate(std::uint64_t serialBefore, std::span<const
             // Refresh's unchanged branch (its key compare against the keys the content was
             // uploaded under, through the image's proof; the memory query below), minus its
             // byte-compare fallback; the image's generation is left where it is.
-            if (!keyProofs || image->ProvedKeys() != image->UploadedKeys()) return fail(FastFail::StorageKeys);
+            const auto imageState = keyProofs ? image->ProvedKeyState() : DccKeyState{};
+            if (!keyProofs || imageState.keys != image->UploadedKeys() || imageState.mixedSignature != image->UploadedMixedSignature()) return fail(FastFail::StorageKeys);
             countKeysProven(true);
         }
         if (!unchanged) query(address, address + bytes, image, nullptr, {i, true, false});
@@ -3986,7 +4012,11 @@ bool ShaderResources::fastRevalidateEach() {
         } else if (!GuestMemory::UnchangedSince(address, bytes, surface.generation)) {
             return false;
         }
-        if (surface.resource.dccAddress != 0 && TextureClearKeys(surface.resource, surface.bytes) != surface.keys) return false;
+        if (surface.resource.dccAddress != 0) {
+            const auto state = TextureClearKeyState(surface.resource, surface.bytes);
+            if (state.keys != surface.keys || state.mixedSignature != surface.mixedSignature) return false;
+            if (surface.source != nullptr && SameKeySurface(surface.source, surface.resource, surface.bytes) && (surface.source->UploadedKeys() != state.keys || surface.source->UploadedMixedSignature() != state.mixedSignature)) return false;
+        }
         // A view made under fast-clear keys stays one only while its image still has results pending
         // over the surface (the lookup prefers them to the clear); once they are flushed the clear
         // the image cannot see wins and the lookup makes a snapshot (cachedTexture's hit rule).
@@ -4375,7 +4405,7 @@ bool ShaderResources::reresolveElements(const std::vector<std::size_t>& elements
             lookupLog().clear();
             return false;
         }
-        validatedTextures[i] = {found->resource, found->bytes, found->keys, found->generation, 0, found->source, found->depth, true, found->committedGeneration, found->committed};
+        validatedTextures[i] = {found->resource, found->bytes, found->keys, found->mixedSignature, found->generation, 0, found->source, found->depth, true, found->committedGeneration, found->committed};
     }
     lookupLog().clear();
     return true;
@@ -5887,13 +5917,16 @@ bool ShaderResources::precollectImages() {
                 if (record.sampled && !noRecords && words.size() == 8 && (binding.imageDepthCompare.empty() || !binding.imageDepthCompare.at(element))) {
                     std::copy(words.begin(), words.end(), record.words.begin());
                     record.components = memo->components;
-                    record.keys = TextureClearKeys(record.resource, record.guestBytes);
+                    const auto keyState = TextureClearKeyState(record.resource, record.guestBytes);
+                    record.keys = keyState.keys;
+                    record.mixedSignature = keyState.mixedSignature;
                     auto& cache = Textures();
                     std::lock_guard lock(cache.mutex);
                     if (const auto it = findSampledEntry(cache, context.device, record.words, record.components); it != cache.entries.end()) {
                         record.texture = it->texture;
                         record.source = it->source;
                         record.entryKeys = it->keys;
+                        record.entryMixedSignature = it->mixedSignature;
                         record.entryGeneration = it->generation;
                         if (TextureCountersReported()) counters.records.fetch_add(1, std::memory_order_relaxed);
                     }
@@ -5929,24 +5962,25 @@ std::shared_ptr<Texture> ShaderResources::fastTexture(ImageRecord& record) {
     if (DepthSurfaceAt(address) || !FlushDepthPlanes(address, bytes).empty()) return nullptr;
     if (GuestMemory::CollectWrites(address, bytes) == 0) return nullptr;
     if (PendingStorageOverlaps(address, bytes, record.source.get())) return nullptr;
-    auto keys = record.keys;
+    DccKeyState keyState{record.keys, record.mixedSignature};
     if (record.resource.dccAddress != 0) {
         const auto scanStart = outcome.profile ? std::chrono::steady_clock::now() : std::chrono::steady_clock::time_point{};
         // Through the proof of the image whose keys they are (the view's source when the surface
         // is the image's, else the texture's): a scan only when the key range was stamped.
-        keys = ProvedClearKeys(record.resource, record.guestBytes, SameKeySurface(record.source.get(), record.resource, record.guestBytes) ? record.source->KeyProof() : record.texture->KeyProof());
+        keyState = ProvedClearKeyState(record.resource, record.guestBytes, SameKeySurface(record.source.get(), record.resource, record.guestBytes) ? record.source->KeyProof() : record.texture->KeyProof());
         if (outcome.profile) LookupOutcomes::Add(LookupOutcomes::DccScan, scanStart);
     }
     // The keys the entry was made under (a view of a pending render target was made under its clear
     // keys and stays valid while they are unchanged); a change is the full lookup's to judge.
-    if (keys != record.entryKeys) return nullptr;
+    if (keyState.keys != record.entryKeys || keyState.mixedSignature != record.entryMixedSignature) return nullptr;
     if (record.source != nullptr) {
+        if (SameKeySurface(record.source.get(), record.resource, record.guestBytes) && (record.source->UploadedKeys() != keyState.keys || record.source->UploadedMixedSignature() != keyState.mixedSignature)) return nullptr;
         if (!StorageImageCached(context, record.source.get()) || !GuestMemory::UnchangedSince(address, bytes, record.source->GenerationFor(address, bytes))) return nullptr;
         if (record.resource.dccAddress != 0 && IsDccClear(record.source->FilledKeys())) return nullptr;
         // Under fast-clear keys the view holds only while its image's results are still pending over
         // the surface; flushed, the clear the image cannot see makes the lookup take a snapshot.
-        if (keys != DccKeys::Uncompressed && StorageTexture::FindPending(address, record.guestBytes) != record.source) return nullptr;
-    } else if ((keys == DccKeys::Uncompressed || keys == DccKeys::ClearSingle) && !GuestMemory::UnchangedSince(address, bytes, record.entryGeneration)) {
+        if (keyState.keys != DccKeys::Uncompressed && StorageTexture::FindPending(address, record.guestBytes) != record.source) return nullptr;
+    } else if ((keyState.keys == DccKeys::Uncompressed || keyState.keys == DccKeys::ClearSingle) && !GuestMemory::UnchangedSince(address, bytes, record.entryGeneration)) {
         return nullptr;
     }
     // The entry must still be the cache's, holding this object (an evicted object is not reused: the
@@ -5957,7 +5991,7 @@ std::shared_ptr<Texture> ShaderResources::fastTexture(ImageRecord& record) {
     if (it == cache.entries.end() || it->texture != record.texture || it->committed.has_value()) return nullptr;
     if (it->source == nullptr) it->generation = record.generation;
     touchTexture(cache, it);
-    logLookup({record.texture.get(), record.resource, record.guestBytes, keys, record.source != nullptr ? 0 : record.generation, record.source.get()});
+    logLookup({record.texture.get(), record.resource, record.guestBytes, keyState.keys, record.source != nullptr ? 0 : record.generation, record.source.get(), false, keyState.mixedSignature});
     outcome.hit = true;
     return std::move(record.texture);
 }

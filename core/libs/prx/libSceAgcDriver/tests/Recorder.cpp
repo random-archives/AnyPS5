@@ -16060,6 +16060,531 @@ void keysFillTests(const Device& device, Recorder& recorder) {
     recorder.Sync();
 }
 
+void mixedKeyClearTests(const Device& device, Recorder& recorder) {
+    const auto& base = device.GetContext();
+    constexpr std::size_t unit = 65536;
+    constexpr std::uint32_t smallSide = 64;
+    constexpr std::size_t smallSurfaceBytes = smallSide * smallSide * 4;
+    constexpr std::size_t smallKeyCount = smallSurfaceBytes / 256;
+    constexpr std::uint32_t largeSide = 256;
+    constexpr std::size_t largeSurfaceBytes = largeSide * largeSide * 4;
+    constexpr std::size_t largeKeyCount = largeSurfaceBytes / 256;
+    constexpr std::size_t keyOffset = largeSurfaceBytes;
+    constexpr std::size_t totalBytes = keyOffset + unit;
+    void* watched = AllocateWatched(totalBytes, unit);
+    std::vector<std::byte> fallback(watched == nullptr ? totalBytes + unit : 0);
+    auto* block = watched != nullptr ? static_cast<std::byte*>(watched) : reinterpret_cast<std::byte*>((reinterpret_cast<std::uintptr_t>(fallback.data()) + unit - 1) & ~(unit - 1));
+    const auto address = reinterpret_cast<std::uint64_t>(block);
+    const auto keysAddress = address + keyOffset;
+    auto* texels = block;
+    auto* keys = block + keyOffset;
+    auto context = base;
+    context.recorder = &recorder;
+    context.nullDescriptors = device.NullDescriptors();
+    TextureDetiler detiler(context);
+    context.detiler = &detiler;
+    {
+        GuestAllocations::Mutation mutation;
+        mutation.Add(block, totalBytes, true, true, true);
+    }
+    struct Cleanup {
+        const Context& context;
+        Recorder& recorder;
+        void* watched;
+        std::byte* block;
+        std::size_t totalBytes;
+        ~Cleanup() {
+            recorder.Sync();
+            WaitForOptimizedPipelines(context.device);
+            SharedResourceCache().Clear();
+            ClearCachedTextures(context.device);
+            recorder.Sync();
+            recorder.FlushDeferredReleases();
+            ClearCachedPipelines(context.device);
+            {
+                GuestAllocations::Mutation mutation;
+                mutation.Remove(block);
+            }
+            if (watched != nullptr) {
+                HostImportFor(context, reinterpret_cast<std::uint64_t>(block), totalBytes);
+                ReleaseWatched(watched, totalBytes);
+            }
+        }
+    } cleanup{context, recorder, watched, block, totalBytes};
+
+    Require(MixedKeyClearEnabled(), "mixed key clear optimization should be enabled by default");
+
+    GuestTextureResource smallResource{};
+    smallResource.baseAddress = address;
+    smallResource.width = smallSide;
+    smallResource.height = smallSide;
+    smallResource.mipCount = 1;
+    smallResource.tileMode = TextureTileMode::kLinear;
+    smallResource.dimension = TextureDimension::k2D;
+    smallResource.format = 56;
+    smallResource.dstSelX = 4;
+    smallResource.dstSelY = 5;
+    smallResource.dstSelZ = 6;
+    smallResource.dstSelW = 7;
+    smallResource.dccAddress = keysAddress;
+
+    const auto markKeys = [&](std::size_t count) {
+        AgcDriver::GuestMemory::MarkWritten(keysAddress, count);
+    };
+
+    std::fill_n(texels, smallSurfaceBytes, std::byte{0x80});
+    std::fill_n(keys, smallKeyCount, std::byte{0xff});
+    markKeys(smallKeyCount);
+    Require(!MixedKeyClearRuns(smallResource, smallSurfaceBytes).has_value(), "uniform 0xff keys must not report mixed key clear runs");
+
+    std::fill_n(keys, smallKeyCount, std::byte{0x00});
+    markKeys(smallKeyCount);
+    Require(!MixedKeyClearRuns(smallResource, smallSurfaceBytes).has_value(), "uniform 0x00 keys must not report mixed key clear runs");
+
+    std::fill_n(keys, smallKeyCount, std::byte{0xff});
+    std::fill_n(keys, 4, std::byte{0x00});
+    std::fill_n(keys + 16, 4, std::byte{0x00});
+    markKeys(smallKeyCount);
+    const auto clear0 = MixedKeyClearRuns(smallResource, smallSurfaceBytes);
+    Require(clear0.has_value(), "mixed 0xff and 0x00 keys must produce clear runs");
+    const std::vector<std::pair<std::size_t, std::size_t>> expectedRuns0{{0, 4}, {16, 20}};
+    Require(clear0->keys == DccKeys::Clear0000 && clear0->pattern == 0u && clear0->signature != 0u && clear0->runs == expectedRuns0, "mixed 0x00 clear runs or signature mismatch");
+
+    const auto state0 = TextureClearKeyState(smallResource, smallSurfaceBytes);
+    Require(state0.keys == DccKeys::Uncompressed && state0.mixedSignature == clear0->signature, "TextureClearKeyState did not preserve mixed signature");
+
+    DccKeyProof proof{};
+    const auto proved0 = ProvedClearKeyState(smallResource, smallSurfaceBytes, proof);
+    Require(proved0.keys == DccKeys::Uncompressed && proved0.mixedSignature == clear0->signature && proof.mixedSignature == clear0->signature, "ProvedClearKeyState did not populate mixed signature");
+    const auto provedRepeat = ProvedClearKeyState(smallResource, smallSurfaceBytes, proof);
+    Require(provedRepeat.keys == DccKeys::Uncompressed && provedRepeat.mixedSignature == clear0->signature, "ProvedClearKeyState failed on repeat proof hit");
+
+    std::fill_n(keys + 16, 4, std::byte{0xff});
+    std::fill_n(keys, 4, std::byte{0xc0});
+    markKeys(smallKeyCount);
+    const auto clear1 = MixedKeyClearRuns(smallResource, smallSurfaceBytes);
+    Require(clear1.has_value() && clear1->keys == DccKeys::Clear1111 && clear1->pattern == 0xffffffffu && clear1->signature != clear0->signature, "mixed 0xc0 clear runs or signature change failed");
+    const auto proved1 = ProvedClearKeyState(smallResource, smallSurfaceBytes, proof);
+    Require(proved1.keys == DccKeys::Uncompressed && proved1.mixedSignature == clear1->signature, "ProvedClearKeyState did not invalidate on mixed signature change");
+
+    std::vector<std::byte> readDst(smallSurfaceBytes, std::byte{0x11});
+    std::fill_n(keys, smallKeyCount, std::byte{0xff});
+    std::fill_n(keys, 4, std::byte{0x00});
+    std::fill_n(keys + 16, 4, std::byte{0x00});
+    markKeys(smallKeyCount);
+    ReadTextureSurface(smallResource, DccKeys::Uncompressed, readDst);
+    for (std::size_t b = 0; b < smallKeyCount; ++b) {
+        const std::byte expected = (b < 4 || (b >= 16 && b < 20)) ? std::byte{0x00} : std::byte{0x80};
+        for (std::size_t off = 0; off < 256; ++off) {
+            Require(readDst[b * 256 + off] == expected, "ReadTextureSurface mixed key clear produced wrong byte");
+        }
+    }
+    Require(texels[0] == std::byte{0x80}, "ReadTextureSurface mutated guest texels");
+
+    std::vector<std::byte> slice(2048, std::byte{0x77});
+    ApplyMixedKeyClear(*clear0, slice, 4096);
+    for (std::size_t i = 0; i < 1024; ++i) Require(slice[i] == std::byte{0x00}, "ApplyMixedKeyClear missed clipped clear run");
+    for (std::size_t i = 1024; i < 2048; ++i) Require(slice[i] == std::byte{0x77}, "ApplyMixedKeyClear overwrote uncompressed tail");
+
+    keys[0] = std::byte{0x40};
+    std::fill_n(keys + 1, smallKeyCount - 1, std::byte{0xff});
+    markKeys(smallKeyCount);
+    const auto clear0001 = MixedKeyClearRuns(keysAddress, smallSurfaceBytes, VK_FORMAT_R8G8B8A8_UNORM, 4, true);
+    const std::array<std::uint8_t, 4> patternBytes0001{0, 0, 0, 0xff};
+    std::uint32_t expected0001 = 0;
+    std::memcpy(&expected0001, patternBytes0001.data(), sizeof(expected0001));
+    Require(clear0001.has_value() && clear0001->keys == DccKeys::Clear0001 && clear0001->pattern == expected0001, "MixedKeyClearRuns rejected 32-bit repeatable 0x40 RGBA8 clear");
+    Require(!MixedKeyClearRuns(keysAddress, smallSurfaceBytes, VK_FORMAT_R16G16B16A16_UNORM, 8, true).has_value(), "MixedKeyClearRuns accepted non-32-bit-repeatable 0x40 RGBA16 clear");
+    std::fill_n(keys, smallKeyCount, std::byte{0xff});
+    keys[0] = std::byte{0x00};
+    markKeys(smallKeyCount);
+    const auto rgba16Clear0 = MixedKeyClearRuns(keysAddress, smallSurfaceBytes, VK_FORMAT_R16G16B16A16_UNORM, 8, true);
+    Require(rgba16Clear0.has_value() && rgba16Clear0->keys == DccKeys::Clear0000 && rgba16Clear0->pattern == 0u, "MixedKeyClearRuns rejected 32-bit-repeatable 0x00 RGBA16 clear");
+
+    keys[0] = std::byte{0x00};
+    keys[1] = std::byte{0xc0};
+    markKeys(smallKeyCount);
+    Require(!MixedKeyClearRuns(smallResource, smallSurfaceBytes).has_value(), "MixedKeyClearRuns accepted multiple distinct clear codes");
+
+    keys[0] = std::byte{0x20};
+    keys[1] = std::byte{0xff};
+    markKeys(smallKeyCount);
+    Require(!MixedKeyClearRuns(smallResource, smallSurfaceBytes).has_value(), "MixedKeyClearRuns accepted ClearRegister in mixed keys");
+
+    keys[0] = std::byte{0x10};
+    keys[1] = std::byte{0xff};
+    markKeys(smallKeyCount);
+    Require(!MixedKeyClearRuns(smallResource, smallSurfaceBytes).has_value(), "MixedKeyClearRuns accepted ClearSingle in mixed keys");
+
+    if (AgcDriver::GuestMemory::Watched(address, smallSurfaceBytes) && AgcDriver::GuestMemory::Watched(keysAddress, smallKeyCount)) {
+        std::fill_n(texels, smallSurfaceBytes, std::byte{0x80});
+        AgcDriver::GuestMemory::CollectWrites(address, smallSurfaceBytes);
+        std::fill_n(keys, smallKeyCount, std::byte{0xff});
+        keys[1] = std::byte{0x00};
+        markKeys(smallKeyCount);
+        AgcDriver::GuestMemory::CollectWrites(keysAddress, smallKeyCount);
+        AgcDriver::GuestMemory::MarkWritten(address + 256, 256);
+        const auto drawn = MixedKeyClearRuns(smallResource, smallSurfaceBytes);
+        Require(drawn.has_value() && drawn->runs.empty(), "MixedKeyClearRuns kept a clear run the driver stored over after its keys were written");
+        markKeys(smallKeyCount);
+        const auto rekeyed = MixedKeyClearRuns(smallResource, smallSurfaceBytes);
+        const std::vector<std::pair<std::size_t, std::size_t>> expectedRekeyed{{1, 2}};
+        Require(rekeyed.has_value() && rekeyed->runs == expectedRekeyed, "MixedKeyClearRuns dropped a clear run whose keys were written after the driver's store");
+        texels[256] = std::byte{0x81};
+        const auto cpuWritten = MixedKeyClearRuns(smallResource, smallSurfaceBytes);
+        Require(cpuWritten.has_value() && cpuWritten->runs == expectedRekeyed, "MixedKeyClearRuns dropped a clear run over a CPU store");
+    }
+
+    const auto readStorageTexel = [&](const std::shared_ptr<StorageTexture>& image, std::uint32_t x, std::uint32_t y) {
+        Buffer readback(context, 4, VK_BUFFER_USAGE_TRANSFER_DST_BIT);
+        std::memset(readback.Bytes().data(), 0x33, 4);
+        const auto commands = recorder.Commands();
+        recorder.Keep(image);
+        RecordMemoryBarrier(context, commands, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT | VK_ACCESS_TRANSFER_WRITE_BIT | VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT, VK_ACCESS_TRANSFER_READ_BIT);
+        VkBufferImageCopy copy{};
+        copy.imageSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
+        copy.imageOffset = {static_cast<std::int32_t>(x), static_cast<std::int32_t>(y), 0};
+        copy.imageExtent = {1, 1, 1};
+        context.Function<PFN_vkCmdCopyImageToBuffer>("vkCmdCopyImageToBuffer")(commands, image->Image(), VK_IMAGE_LAYOUT_GENERAL, readback.Handle(), 1, &copy);
+        RecordMemoryBarrier(context, commands, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_HOST_BIT, VK_ACCESS_TRANSFER_WRITE_BIT, VK_ACCESS_HOST_READ_BIT);
+        recorder.Sync();
+        std::uint32_t value = 0;
+        std::memcpy(&value, readback.Bytes().data(), sizeof(value));
+        return value;
+    };
+
+    std::fill_n(texels, smallSurfaceBytes, std::byte{0x80});
+    std::fill_n(keys, smallKeyCount, std::byte{0xff});
+    keys[1] = std::byte{0x00};
+    markKeys(smallKeyCount);
+    {
+        auto stagingContext = context;
+        stagingContext.hostImportAlignment = 0;
+        stagingContext.dmaBufImport = false;
+        auto staged = StorageTexture::Create(stagingContext, detiler, smallResource, 0);
+        Require(staged->UploadedKeys() == DccKeys::Uncompressed && staged->UploadedMixedSignature() != 0u, "staging StorageTexture did not record mixed key state");
+        Require(readStorageTexel(staged, 0, 0) == 0x80808080u, "staging StorageTexture overwrote uncompressed block 0");
+        Require(readStorageTexel(staged, 0, 1) == 0x00000000u, "staging StorageTexture missed clear-coded block 1");
+        Require(texels[256] == std::byte{0x80}, "staging StorageTexture upload mutated guest texels");
+    }
+
+    if (watched != nullptr && context.hostImportAlignment != 0 && HostImportFor(context, address, totalBytes) != nullptr) {
+        std::fill_n(texels, smallSurfaceBytes, std::byte{0x80});
+        std::fill_n(keys, smallKeyCount, std::byte{0xff});
+        keys[1] = std::byte{0x00};
+        markKeys(smallKeyCount);
+        auto smallImage = StorageTexture::Create(context, detiler, smallResource, 0);
+        Require(smallImage->UploadedKeys() == DccKeys::Uncompressed && smallImage->UploadedMixedSignature() != 0u, "whole-import StorageTexture did not record mixed signature");
+        const auto sig0 = smallImage->UploadedMixedSignature();
+        Require(readStorageTexel(smallImage, 0, 0) == 0x80808080u && readStorageTexel(smallImage, 0, 1) == 0x00000000u, "whole-import StorageTexture initial mixed upload gave wrong texels");
+
+        keys[1] = std::byte{0xc0};
+        markKeys(smallKeyCount);
+        smallImage->Refresh();
+        Require(smallImage->UploadedKeys() == DccKeys::Uncompressed && smallImage->UploadedMixedSignature() != sig0 && smallImage->UploadedMixedSignature() != 0u, "StorageTexture::Refresh did not update mixed signature from 0x00 to 0xc0");
+        Require(readStorageTexel(smallImage, 0, 0) == 0x80808080u && readStorageTexel(smallImage, 0, 1) == 0xffffffffu, "StorageTexture::Refresh mixed 0xc0 produced wrong texels");
+
+        keys[1] = std::byte{0xff};
+        markKeys(smallKeyCount);
+        smallImage->Refresh();
+        Require(smallImage->UploadedKeys() == DccKeys::Uncompressed && smallImage->UploadedMixedSignature() == 0u, "StorageTexture::Refresh did not clear mixed signature when normalized to 0xff");
+        Require(readStorageTexel(smallImage, 0, 1) == 0x80808080u, "StorageTexture::Refresh after normalizing keys did not restore guest texels");
+
+        keys[1] = std::byte{0x00};
+        markKeys(smallKeyCount);
+        smallImage->Refresh();
+        Require(smallImage->UploadedKeys() == DccKeys::Uncompressed && smallImage->UploadedMixedSignature() != 0u, "StorageTexture::Refresh back to mixed 0x00 failed");
+        const VkClearColorValue red{{1.0f, 0.0f, 0.0f, 1.0f}};
+        const VkImageSubresourceRange range{VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
+        {
+            const auto commands = recorder.Commands();
+            recorder.Keep(smallImage);
+            RecordMemoryBarrier(context, commands, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT | VK_ACCESS_TRANSFER_WRITE_BIT, VK_ACCESS_TRANSFER_WRITE_BIT);
+            context.Function<PFN_vkCmdClearColorImage>("vkCmdClearColorImage")(commands, smallImage->Image(), VK_IMAGE_LAYOUT_GENERAL, &red, 1, &range);
+            RecordMemoryBarrier(context, commands, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, VK_ACCESS_TRANSFER_WRITE_BIT, VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT | VK_ACCESS_TRANSFER_READ_BIT | VK_ACCESS_TRANSFER_WRITE_BIT);
+            smallImage->MarkDirty();
+        }
+        recorder.Sync();
+        Require(keys[1] == std::byte{0xff} && smallImage->UploadedKeys() == DccKeys::Uncompressed && smallImage->UploadedMixedSignature() == 0u, "StorageTexture::MarkDirty did not normalize mixed keys and clear mixed signature");
+
+        TextureCache storageRevalidateCache(context);
+        auto storageShaderCtx = context;
+        storageShaderCtx.textureCache = &storageRevalidateCache;
+        ShaderRecompiler::RecompileResult storageSampleProgram;
+        ShaderRecompiler::DescriptorBinding storageBinding;
+        storageBinding.kind = ShaderRecompiler::DescriptorKind::SampledImage;
+        storageBinding.role = ShaderRecompiler::DescriptorRole::GuestImages;
+        storageBinding.descriptorSet = 0;
+        storageBinding.binding = ShaderRecompiler::RuntimeAbi::FirstImageBinding;
+        storageBinding.count = 1;
+        storageBinding.imageSamplers = {0};
+        storageBinding.imageShape = ShaderRecompiler::DescriptorImageShape::Image2D;
+        auto storageWords = linearTextureWords(address, smallSide, smallSide, 56);
+        storageWords[6] = (1u << 21u) | (static_cast<std::uint32_t>((keysAddress >> 8u) & 0xffu) << 24u);
+        storageWords[7] = static_cast<std::uint32_t>(keysAddress >> 16u);
+        storageBinding.guestDescriptor.assign(storageWords.begin(), storageWords.end());
+        storageSampleProgram.bindings.push_back(storageBinding);
+        const CompiledShader storageCompute{ShaderRecompiler::ShaderStage::Compute, &storageSampleProgram, 0};
+        smallImage.reset();
+        ClearCachedTextures(context.device);
+        recorder.Sync();
+
+        std::fill_n(texels, smallSurfaceBytes, std::byte{0x80});
+        std::fill_n(keys, smallKeyCount, std::byte{0xff});
+        keys[0] = std::byte{0x00};
+        markKeys(smallKeyCount);
+        auto residentOwner = CachedStorageSurface(storageShaderCtx, smallResource);
+        recorder.Sync();
+        if (context.nullDescriptors && residentOwner != nullptr) {
+            ShaderResources storageResources(storageShaderCtx, storageCompute);
+            Require(storageResources.Revalidate(std::span(&storageCompute, 1)), "ShaderResources over StorageTexture failed unchanged Revalidate");
+            keys[0] = std::byte{0xc0};
+            markKeys(smallKeyCount);
+            Require(storageResources.Revalidate(std::span(&storageCompute, 1)), "ShaderResources over StorageTexture failed Revalidate after mixed signature change");
+            const auto boundImages = storageResources.StorageImages();
+            Require(boundImages.size() == 1, "ShaderResources lost StorageImage after mixed signature change");
+            residentOwner->Refresh();
+            Require(readStorageTexel(residentOwner, 0, 0) == 0xffffffffu, "StorageTexture did not update after mixed signature Revalidate");
+        }
+        residentOwner.reset();
+        SharedResourceCache().Clear();
+        ClearCachedTextures(context.device);
+        recorder.Sync();
+
+        GuestTextureResource largeResource = smallResource;
+        largeResource.width = largeSide;
+        largeResource.height = largeSide;
+        std::fill_n(texels, largeSurfaceBytes, std::byte{0x80});
+        std::fill_n(keys, largeKeyCount, std::byte{0xff});
+        std::fill_n(keys, 4, std::byte{0x00});
+        std::fill_n(keys + 254, 4, std::byte{0x00});
+        markKeys(largeKeyCount);
+        auto largeImage = StorageTexture::Create(context, detiler, largeResource, 0);
+        Require(largeImage->UploadedKeys() == DccKeys::Uncompressed && largeImage->UploadedMixedSignature() != 0u, "blockUnits StorageTexture did not record mixed signature");
+        Require(readStorageTexel(largeImage, 0, 0) == 0x00000000u, "uploadWindows missed block 0 clear run");
+        Require(readStorageTexel(largeImage, 0, 1) == 0x80808080u, "uploadWindows overwrote row 1 uncompressed texels");
+        Require(readStorageTexel(largeImage, 127, 63) == 0x80808080u, "uploadWindows overwrote block 253 before boundary run");
+        Require(readStorageTexel(largeImage, 128, 63) == 0x00000000u, "uploadWindows missed block 254 in unit 0");
+        Require(readStorageTexel(largeImage, 0, 64) == 0x00000000u, "uploadWindows missed clipped block 256 across 64 KiB boundary in unit 1");
+        Require(readStorageTexel(largeImage, 128, 64) == 0x80808080u, "uploadWindows overwrote block 258 after boundary run");
+        Require(readStorageTexel(largeImage, 0, 128) == 0x80808080u, "uploadWindows overwrote unit 2 uncompressed texels");
+        Require(texels[0] == std::byte{0x80} && texels[65536] == std::byte{0x80}, "uploadWindows mutated guest texels");
+        largeImage.reset();
+        SharedResourceCache().Clear();
+        ClearCachedTextures(context.device);
+        recorder.Sync();
+
+        GuestTextureResource tiledResource = largeResource;
+        tiledResource.tileMode = TextureTileMode::kR64KBX;
+        std::fill_n(texels, largeSurfaceBytes, std::byte{0x80});
+        std::fill_n(keys, largeKeyCount, std::byte{0xff});
+        std::fill_n(keys, 4, std::byte{0x00});
+        std::fill_n(keys + 254, 4, std::byte{0x00});
+        markKeys(largeKeyCount);
+        auto tiledImage = StorageTexture::Create(context, detiler, tiledResource, 0);
+        Require(tiledImage->UploadedMixedSignature() != 0u, "tiled block-unit StorageTexture did not record mixed signature");
+        Buffer tiledReadback(context, largeSurfaceBytes, VK_BUFFER_USAGE_TRANSFER_DST_BIT);
+        {
+            const auto commands = recorder.Commands();
+            recorder.Keep(tiledImage);
+            RecordMemoryBarrier(context, commands, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT | VK_ACCESS_TRANSFER_WRITE_BIT, VK_ACCESS_TRANSFER_READ_BIT);
+            VkBufferImageCopy copy{};
+            copy.imageSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
+            copy.imageExtent = {largeSide, largeSide, 1};
+            context.Function<PFN_vkCmdCopyImageToBuffer>("vkCmdCopyImageToBuffer")(commands, tiledImage->Image(), VK_IMAGE_LAYOUT_GENERAL, tiledReadback.Handle(), 1, &copy);
+            RecordMemoryBarrier(context, commands, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_HOST_BIT, VK_ACCESS_TRANSFER_WRITE_BIT, VK_ACCESS_HOST_READ_BIT);
+        }
+        recorder.Sync();
+        std::size_t cleared = 0, stored = 0;
+        for (std::size_t texel = 0; texel < largeSurfaceBytes / 4; ++texel) {
+            std::uint32_t value = 0;
+            std::memcpy(&value, tiledReadback.Bytes().data() + texel * 4, sizeof(value));
+            cleared += value == 0x00000000u;
+            stored += value == 0x80808080u;
+        }
+        Require(cleared == 8 * 64 && stored == largeSurfaceBytes / 4 - 8 * 64, "tiled uploadWindows filled " + std::to_string(cleared) + " texels with the clear and kept " + std::to_string(stored) + " stored texels, expected 512 and the rest");
+    }
+
+    SharedResourceCache().Clear();
+    ClearCachedTextures(context.device);
+    recorder.Sync();
+
+    {
+        TextureCache textureCache(context);
+        auto cacheContext = context;
+        cacheContext.textureCache = &textureCache;
+        SampleProgram program(cacheContext, recorder);
+        auto words = linearTextureWords(address, smallSide, smallSide, 56);
+        words[6] = (1u << 21u) | (static_cast<std::uint32_t>((keysAddress >> 8u) & 0xffu) << 24u);
+        words[7] = static_cast<std::uint32_t>(keysAddress >> 16u);
+
+        std::fill_n(texels, smallSurfaceBytes, std::byte{0x80});
+        std::fill_n(keys, smallKeyCount, std::byte{0xff});
+        keys[32] = std::byte{0x00};
+        markKeys(smallKeyCount);
+
+        auto t0 = CachedSampledTexture(cacheContext, words);
+        Require(t0 != nullptr, "CachedSampledTexture returned null for mixed 0x00");
+        expectRed(program.Red(t0->View(), t0->Layout(), 0.0f), 0.0f, "sampled mixed 0x00 clear texel");
+        auto t0Hit = CachedSampledTexture(cacheContext, words);
+        Require(t0Hit == t0, "CachedSampledTexture missed when mixed signature was unchanged");
+        const bool viewBacked = t0->StorageSource() != nullptr;
+
+        keys[32] = std::byte{0xc0};
+        markKeys(smallKeyCount);
+        auto t1 = CachedSampledTexture(cacheContext, words);
+        Require(t1 != nullptr && (viewBacked ? t1 == t0 : t1 != t0), "CachedSampledTexture returned unexpected object across mixed 0x00 -> 0xc0 change");
+        expectRed(program.Red(t1->View(), t1->Layout(), 0.0f), 1.0f, "sampled mixed 0xc0 clear texel");
+
+        keys[32] = std::byte{0xff};
+        markKeys(smallKeyCount);
+        auto t2 = CachedSampledTexture(cacheContext, words);
+        Require(t2 != nullptr && (viewBacked ? t2 == t1 : t2 != t1), "CachedSampledTexture returned unexpected object across mixed 0xc0 -> 0xff change");
+        expectRed(program.Red(t2->View(), t2->Layout(), 0.0f), 128.0f / 255.0f, "sampled uncompressed 0xff texel");
+
+        t0.reset();
+        t0Hit.reset();
+        t1.reset();
+        t2.reset();
+        SharedResourceCache().Clear();
+        ClearCachedTextures(context.device);
+        recorder.Sync();
+
+        auto snapshotCtx = cacheContext;
+        snapshotCtx.hostImportAlignment = 0;
+        snapshotCtx.dmaBufImport = false;
+        keys[32] = std::byte{0x00};
+        markKeys(smallKeyCount);
+        auto s0 = CachedSampledTexture(snapshotCtx, words);
+        Require(s0 != nullptr && s0->StorageSource() == nullptr, "snapshot CachedSampledTexture returned storage-backed view");
+        expectRed(program.Red(s0->View(), s0->Layout(), 0.0f), 0.0f, "snapshot sampled mixed 0x00 clear texel");
+        Require(CachedSampledTexture(snapshotCtx, words) == s0, "snapshot CachedSampledTexture missed when mixed signature unchanged");
+        texels[0] = std::byte{0x40};
+        AgcDriver::GuestMemory::MarkWritten(address, 256);
+        auto s0Edited = CachedSampledTexture(snapshotCtx, words);
+        Require(s0Edited != nullptr && s0Edited != s0, "snapshot CachedSampledTexture missed uncompressed texel change under mixed signature");
+        expectRed(program.Red(s0Edited->View(), s0Edited->Layout(), 0.0f), 0.0f, "snapshot sampled mixed 0x00 clear texel after uncompressed edit");
+        texels[0] = std::byte{0x80};
+        AgcDriver::GuestMemory::MarkWritten(address, 256);
+        keys[32] = std::byte{0xc0};
+        markKeys(smallKeyCount);
+        auto s1 = CachedSampledTexture(snapshotCtx, words);
+        Require(s1 != nullptr && s1 != s0Edited, "snapshot CachedSampledTexture reused stale texture across mixed 0x00 -> 0xc0 change");
+        expectRed(program.Red(s1->View(), s1->Layout(), 0.0f), 1.0f, "snapshot sampled mixed 0xc0 clear texel");
+        keys[32] = std::byte{0xff};
+        markKeys(smallKeyCount);
+        auto s2 = CachedSampledTexture(snapshotCtx, words);
+        Require(s2 != nullptr && s2 != s1, "snapshot CachedSampledTexture reused stale texture across mixed 0xc0 -> 0xff change");
+        expectRed(program.Red(s2->View(), s2->Layout(), 0.0f), 128.0f / 255.0f, "snapshot sampled uncompressed 0xff texel");
+
+        if (context.nullDescriptors) {
+            ShaderRecompiler::RecompileResult sampleProgram;
+            ShaderRecompiler::DescriptorBinding binding;
+            binding.kind = ShaderRecompiler::DescriptorKind::SampledImage;
+            binding.role = ShaderRecompiler::DescriptorRole::GuestImages;
+            binding.descriptorSet = 0;
+            binding.binding = ShaderRecompiler::RuntimeAbi::FirstImageBinding;
+            binding.count = 1;
+            binding.imageSamplers = {0};
+            binding.imageShape = ShaderRecompiler::DescriptorImageShape::Image2D;
+            binding.guestDescriptor.assign(words.begin(), words.end());
+            sampleProgram.bindings.push_back(binding);
+            const CompiledShader computeShader{ShaderRecompiler::ShaderStage::Compute, &sampleProgram, 0};
+
+            keys[32] = std::byte{0x00};
+            markKeys(smallKeyCount);
+            ShaderResources resources(snapshotCtx, computeShader);
+            Require(resources.Revalidate(std::span(&computeShader, 1)), "ShaderResources sampled Revalidate failed while unchanged");
+            keys[32] = std::byte{0xc0};
+            markKeys(smallKeyCount);
+            Require(!resources.Revalidate(std::span(&computeShader, 1)), "ShaderResources snapshot Revalidate reused stale mixed signature");
+            auto after = CachedSampledTexture(snapshotCtx, words);
+            Require(after != nullptr, "CachedSampledTexture returned null after ShaderResources Revalidate");
+            expectRed(program.Red(after->View(), after->Layout(), 0.0f), 1.0f, "ShaderResources Revalidate left stale sampled mixed clear");
+        }
+    }
+
+    SharedResourceCache().Clear();
+    ClearCachedTextures(context.device);
+    recorder.Sync();
+
+    if (device.Graphics()) {
+        auto shader = [](auto& words, std::uint64_t variant) {
+            ShaderRecompiler::RecompileResult result;
+            result.spirv = std::vector<std::uint32_t>(std::begin(words), std::end(words));
+            result.variantId = variant;
+            return result;
+        };
+        auto coverVertex = shader(COVER_VERT_SPV, 301);
+        auto coverPixel = shader(COVER_FRAG_SPV, 302);
+        const std::array coverShaders{
+            CompiledShader{ShaderRecompiler::ShaderStage::Vertex, &coverVertex, 0},
+            CompiledShader{ShaderRecompiler::ShaderStage::Fragment, &coverPixel, 0}
+        };
+        const AgcDriver::Pm4::DrawParameters triangle{0, 3, 0, 1, 0, false};
+        auto noDetiler = context;
+        noDetiler.detiler = nullptr;
+
+        for (const auto mode : {ColorTileMode::Linear, ColorTileMode::RenderTarget}) {
+            const std::size_t targetBytes = mode == ColorTileMode::Linear ? smallSurfaceBytes : unit;
+            const std::size_t targetKeyCount = targetBytes / 256u;
+            std::fill_n(texels, targetBytes, std::byte{0x80});
+            std::fill_n(keys, targetKeyCount, std::byte{0xff});
+            keys[0] = std::byte{0x00};
+            markKeys(targetKeyCount);
+
+            State state{};
+            state.stages.path = ShaderPath::Vertex;
+            state.color = {address, {smallSide, smallSide}, VK_FORMAT_R8G8B8A8_UNORM, targetBytes, 0xe4u, mode, 4};
+            state.color.surfaceAddress = address;
+            state.color.surfaceExtent = {smallSide, smallSide};
+            state.color.dccAddress = keysAddress;
+            state.color.dccPipeAligned = true;
+            state.colors = {state.color};
+            state.hasColorTarget = true;
+            state.renderExtent = {smallSide, smallSide};
+            state.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
+            state.viewport = {0, 0, static_cast<float>(smallSide), static_cast<float>(smallSide), 0, 1};
+            state.scissor = {{32, 0}, {32, smallSide}};
+            state.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
+            state.blend.colorWriteMask = 15;
+            state.blends = {state.blend};
+
+            Draw(noDetiler, state, triangle, coverShaders);
+            WaitForOptimizedPipelines(context.device);
+            recorder.Sync();
+
+            std::vector<std::byte> detiled(smallSurfaceBytes);
+            ReadColorTarget(state.color, detiled);
+            if (mode == ColorTileMode::Linear) {
+                for (std::uint32_t x = 0; x < 32; ++x) {
+                    const std::size_t off0 = x * 4;
+                    const std::size_t off1 = (smallSide + x) * 4;
+                    for (std::size_t c = 0; c < 4; ++c) {
+                        Require(detiled[off0 + c] == std::byte{0x00}, "non-resident linear target missed mixed clear row 0");
+                        Require(detiled[off1 + c] == std::byte{0x80}, "non-resident linear target overwrote row 1");
+                    }
+                }
+            } else {
+                std::size_t zeroPixels = 0;
+                std::size_t origPixels = 0;
+                for (std::uint32_t y = 0; y < smallSide; ++y) {
+                    for (std::uint32_t x = 0; x < 32; ++x) {
+                        const std::size_t off = (y * smallSide + x) * 4;
+                        if (detiled[off] == std::byte{0x00} && detiled[off + 1] == std::byte{0x00} && detiled[off + 2] == std::byte{0x00} && detiled[off + 3] == std::byte{0x00}) ++zeroPixels;
+                        else if (detiled[off] == std::byte{0x80} && detiled[off + 1] == std::byte{0x80} && detiled[off + 2] == std::byte{0x80} && detiled[off + 3] == std::byte{0x80}) ++origPixels;
+                    }
+                }
+                Require(detiled[0] == std::byte{0x00} && zeroPixels > 0 && origPixels > 0, "non-resident tiled target missed mixed key clear before detile");
+            }
+            for (std::size_t b = 0; b < targetKeyCount; ++b) Require(keys[b] == std::byte{0xff}, "non-resident draw left mixed keys un-normalized");
+        }
+    }
+
+    recorder.Sync();
+    std::cout << "Mixed key clear tests passed\n";
+}
+
 void integerClearTests(const Device& device) {
     const auto& context = device.GetContext();
     std::size_t tested = 0;
@@ -17825,6 +18350,10 @@ int main(int argc, char** argv) {
             return vertexTargetRangeTests(device, recorder, std::string_view(argv[1]) == "--vertex-target-range-imported") ? 0 : 77;
         }
 
+        if (argc == 2 && std::string_view(argv[1]) == "--mixed-key-clear-only") {
+            mixedKeyClearTests(device, recorder);
+            return 0;
+        }
 #ifdef _WIN32
         if (argc == 2 && std::string_view(argv[1]) == "--host-import-second-mapping-only") {
             secondMappingImportTests(device);
@@ -17889,6 +18418,7 @@ int main(int argc, char** argv) {
         movedMetadataTests(device, recorder);
         viewPastLastMipTests(device, recorder);
         keysFillTests(device, recorder);
+        mixedKeyClearTests(device, recorder);
         clearHandOverTests(device, recorder, false);
         clearHandOverTests(device, recorder, true);
         integerClearTests(device);
