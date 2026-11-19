@@ -418,6 +418,8 @@ public:
     // does when it lists no image, and all an access AccessKeptByCpu approved needs): whether any
     // unit was published.
     static bool PublishShadowsOnly(std::uint64_t address, std::size_t bytes, PublishScope scope, const char* reason = "memory access", bool waited = false);
+    static bool PublishShadowsOnly(std::span<const std::pair<std::uint64_t, std::uint64_t>> ranges, PublishScope scope, const char* reason = "memory access", bool waited = false);
+    static void SubtractPendingUnits(std::vector<std::pair<std::uint64_t, std::uint64_t>>& ranges);
     // For the [hooksync] recorded-store line: images a FlushPending stored after a hook skip of
     // theirs (AccessKeptByCpu), of which by the hook for the same read site as the last skip; 10 s deltas.
     struct HookSkipCounts {

@@ -5674,11 +5674,66 @@ void StorageTexture::awaitStoredSave(const std::vector<bool>* layers) {
 }
 
 bool StorageTexture::PublishShadowsOnly(std::uint64_t address, std::size_t bytes, PublishScope scope, const char* reason, bool waited) {
-    if (scope == PublishScope::None || !AnyShadowedOverlaps(address, bytes)) return false;
+    if (bytes == 0) return false;
+    const auto end = bytes > std::numeric_limits<std::uint64_t>::max() - address ? std::numeric_limits<std::uint64_t>::max() : address + bytes;
+    const std::pair<std::uint64_t, std::uint64_t> single{address, end};
+    return PublishShadowsOnly(std::span(&single, 1), scope, reason, waited);
+}
+
+bool StorageTexture::PublishShadowsOnly(std::span<const std::pair<std::uint64_t, std::uint64_t>> ranges, PublishScope scope, const char* reason, bool waited) {
+    if (scope == PublishScope::None || ranges.empty() || !AnyShadowedOverlaps(ranges)) return false;
     std::lock_guard gpu(GuestMemory::GpuMutex());
-    if (PublishShadow(address, bytes, scope, PublishReasonFor(reason), waited) == 0) return false;
+    const auto publishReason = PublishReasonFor(reason);
+    std::size_t units = 0;
+    for (const auto& [begin, end] : ranges) {
+        if (end > begin) units += PublishShadow(begin, static_cast<std::size_t>(end - begin), scope, publishReason, waited);
+    }
+    if (units == 0) return false;
     waitForIdlePublish(reason);
     return true;
+}
+
+void StorageTexture::SubtractPendingUnits(std::vector<std::pair<std::uint64_t, std::uint64_t>>& ranges) {
+    if (ranges.empty()) return;
+    std::vector<std::pair<std::uint64_t, std::uint64_t>> pendingUnits;
+    {
+        auto& pending = Pending();
+        std::lock_guard lock(pending.mutex);
+        for (const auto* texture : pending.textures) {
+            for (std::uint32_t layer = 0; layer < texture->trackedLayers; ++layer) {
+                if (!texture->layerPending[layer]) continue;
+                const auto begin = texture->layerBegin(layer);
+                const auto end = begin + texture->layerBytes(layer);
+                constexpr std::uint64_t unitAlign = 65536ull;
+                const auto unitBegin = begin > std::numeric_limits<std::uint64_t>::max() - (unitAlign - 1) ? std::numeric_limits<std::uint64_t>::max() : (begin + unitAlign - 1) & ~(unitAlign - 1);
+                const auto unitEnd = end & ~(unitAlign - 1);
+                if (unitEnd > unitBegin) pendingUnits.emplace_back(unitBegin, unitEnd);
+            }
+        }
+    }
+    if (pendingUnits.empty()) return;
+    std::sort(pendingUnits.begin(), pendingUnits.end());
+    std::size_t merged = 0;
+    for (const auto& [begin, end] : pendingUnits) {
+        if (merged != 0 && begin <= pendingUnits[merged - 1].second) pendingUnits[merged - 1].second = std::max(pendingUnits[merged - 1].second, end);
+        else pendingUnits[merged++] = {begin, end};
+    }
+    pendingUnits.resize(merged);
+    std::vector<std::pair<std::uint64_t, std::uint64_t>> filtered;
+    filtered.reserve(ranges.size());
+    std::size_t p = 0;
+    for (const auto& [begin, end] : ranges) {
+        std::uint64_t cursor = begin;
+        while (p < pendingUnits.size() && pendingUnits[p].second <= cursor) ++p;
+        while (p < pendingUnits.size() && pendingUnits[p].first < end) {
+            if (pendingUnits[p].first > cursor) filtered.emplace_back(cursor, pendingUnits[p].first);
+            cursor = std::max(cursor, pendingUnits[p].second);
+            if (cursor >= end) break;
+            ++p;
+        }
+        if (cursor < end) filtered.emplace_back(cursor, end);
+    }
+    ranges = std::move(filtered);
 }
 
 namespace {
