@@ -53,15 +53,25 @@
  */
 
 #include "prx/libwebrtc/libwebrtc.hpp"
+#include "prx/libc/include/GuestPtr.hpp"
 #include "prx/libc/libc.hpp"
 
+#include <array>
 #include <bit>
 #include <stdexcept>
 
 namespace {
 
+constexpr std::size_t FixedPayloadBytes = 16;
+constexpr std::size_t MaxSsrcs = 255;
+
 std::uint32_t ReadBigEndian(const std::uint8_t* bytes) {
     return (static_cast<std::uint32_t>(bytes[0]) << 24) | (static_cast<std::uint32_t>(bytes[1]) << 16) | (static_cast<std::uint32_t>(bytes[2]) << 8) | bytes[3];
+}
+
+void WriteRemb(WebRtcRtcpRemb* remb, const WebRtcRtcpRemb& host) {
+    if (!GuestPtr<WebRtcRtcpRemb>(remb).CopyOut(host))
+        throw std::invalid_argument("Remb::Parse requires a writable object");
 }
 
 }
@@ -71,36 +81,55 @@ extern "C" {
 bool APS5_VABI _ZN6webrtc4rtcp4Remb5ParseERKNS0_12CommonHeaderE_nid_postfix(WebRtcRtcpRemb* remb, const WebRtcRtcpCommonHeader* packet) {
     if (!remb || !packet)
         throw std::invalid_argument("Remb::Parse requires an object and common header");
-    if (packet->payloadSize < 16)
+    WebRtcRtcpCommonHeader header{};
+    if (!GuestPtr<WebRtcRtcpCommonHeader>(packet).CopyIn(header))
+        throw std::invalid_argument("Remb::Parse requires a readable common header");
+    if (header.payloadSize < FixedPayloadBytes)
         return false;
-    const auto* payload = packet->payload;
-    if (!payload)
+    if (!header.payload)
         throw std::invalid_argument("Remb::Parse requires a payload");
-    if (ReadBigEndian(payload + 8) != 0x52454d42)
+    std::array<std::uint8_t, FixedPayloadBytes + MaxSsrcs * 4> payload{};
+    if (!GuestPtr<std::uint8_t>(header.payload).CopyIn(payload.data(), FixedPayloadBytes))
+        throw std::invalid_argument("Remb::Parse requires a readable payload");
+    if (ReadBigEndian(payload.data() + 8) != 0x52454d42)
         return false;
     const std::uint8_t count = payload[12];
-    if (packet->payloadSize != 16u + count * 4u)
+    if (header.payloadSize != 16u + count * 4u)
         return false;
-    remb->senderSsrc = ReadBigEndian(payload);
-    remb->mediaSsrc = ReadBigEndian(payload + 4);
+    if (!GuestPtr<std::uint8_t>(header.payload + FixedPayloadBytes).CopyIn(payload.data() + FixedPayloadBytes, count * 4u))
+        throw std::invalid_argument("Remb::Parse requires a readable payload");
+    WebRtcRtcpRemb host{};
+    if (!GuestWritable_nid_no_patch(remb, sizeof(*remb)) || !GuestPtr<WebRtcRtcpRemb>(remb).CopyIn(host))
+        throw std::invalid_argument("Remb::Parse requires a writable object");
+    host.senderSsrc = ReadBigEndian(payload.data());
+    host.mediaSsrc = ReadBigEndian(payload.data() + 4);
     const std::uint8_t exponent = payload[13] >> 2;
     const std::uint64_t mantissa = (static_cast<std::uint32_t>(payload[13] & 3) << 16) | (static_cast<std::uint32_t>(payload[14]) << 8) | payload[15];
-    remb->bitrateBps = std::bit_cast<std::int64_t>(mantissa << exponent);
-    const bool shiftOverflow = (static_cast<std::uint64_t>(remb->bitrateBps) >> exponent) != mantissa;
-    if (remb->bitrateBps < 0 || shiftOverflow)
+    host.bitrateBps = std::bit_cast<std::int64_t>(mantissa << exponent);
+    const bool shiftOverflow = (static_cast<std::uint64_t>(host.bitrateBps) >> exponent) != mantissa;
+    if (host.bitrateBps < 0 || shiftOverflow) {
+        WriteRemb(remb, host);
         return false;
-    remb->ssrcEnd = remb->ssrcBegin;
-    const std::size_t capacity = remb->ssrcBegin ? remb->ssrcCapacityEnd - remb->ssrcBegin : 0;
+    }
+    std::array<std::uint32_t, MaxSsrcs> ssrcs{};
+    for (std::uint8_t i = 0; i < count; ++i)
+        ssrcs[i] = ReadBigEndian(payload.data() + FixedPayloadBytes + i * 4);
+    const std::size_t capacity = host.ssrcBegin ? host.ssrcCapacityEnd - host.ssrcBegin : 0;
+    if (count != 0 && count <= capacity && !GuestWritable_nid_no_patch(host.ssrcBegin, count * sizeof(std::uint32_t)))
+        throw std::invalid_argument("Remb::Parse requires writable SSRC storage");
+    host.ssrcEnd = host.ssrcBegin;
     if (count > capacity) {
+        WriteRemb(remb, host);
         auto* storage = static_cast<std::uint32_t*>(_Znwm_nid_postfix(count * sizeof(std::uint32_t)));
-        _ZdlPv_nid_postfix(remb->ssrcBegin);
-        remb->ssrcBegin = storage;
-        remb->ssrcEnd = storage;
-        remb->ssrcCapacityEnd = storage + count;
+        _ZdlPv_nid_postfix(host.ssrcBegin);
+        host.ssrcBegin = storage;
+        host.ssrcEnd = storage;
+        host.ssrcCapacityEnd = storage + count;
     }
-    for (std::uint8_t i = 0; i < count; ++i) {
-        *remb->ssrcEnd++ = ReadBigEndian(payload + 16 + i * 4);
-    }
+    if (!GuestPtr<std::uint32_t>(host.ssrcBegin).CopyOut(ssrcs.data(), count))
+        throw std::invalid_argument("Remb::Parse requires writable SSRC storage");
+    host.ssrcEnd = host.ssrcBegin + count;
+    WriteRemb(remb, host);
     return true;
 }
 
