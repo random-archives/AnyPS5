@@ -119,7 +119,7 @@ void TestBigAppList(TList list) {
 }
 
 template<typename TValue, typename TQuery>
-void TestRunningAppAnswer(TQuery query, TValue expected, TValue sentinel, int nullOutputResult) {
+void TestRunningAppAnswer(TQuery query, TValue expected, TValue sentinel, int nullOutputResult, int unwritableResult) {
     const std::int32_t runningAppId = sceSystemServiceGetAppIdOfRunningBigApp();
     TValue value = sentinel;
     Require(query(runningAppId, &value) == SYSTEM_SERVICE_OK && value == expected);
@@ -127,13 +127,16 @@ void TestRunningAppAnswer(TQuery query, TValue expected, TValue sentinel, int nu
     for (const std::int32_t other : {runningAppId + 1, runningAppId - 1, -1, std::numeric_limits<std::int32_t>::min(), std::numeric_limits<std::int32_t>::max()}) {
         Require(query(other, nullptr) == nullOutputResult);
     }
+    errno = 71;
+    Require(query(runningAppId, reinterpret_cast<TValue*>(0x10)) == unwritableResult);
+    Require(errno == 71);
 }
 
 void TestRunningAppUser() {
     constexpr std::int32_t Sentinel = 0x5a5a5a5a;
-    TestRunningAppAnswer<std::int32_t>(sceLncUtilGetAppLaunchedUser, USER_SERVICE_INITIAL_USER_ID, Sentinel, LNC_UTIL_ERROR_INVALID_ARGUMENT);
-    TestRunningAppAnswer<std::int32_t>(sceSystemServiceGetAppLaunchedUser, USER_SERVICE_INITIAL_USER_ID, Sentinel, LNC_UTIL_ERROR_INVALID_ARGUMENT);
-    TestRunningAppAnswer<std::int32_t>(sceShellCoreUtilGetUserFocus, USER_SERVICE_INITIAL_USER_ID, Sentinel, SHELL_CORE_UTIL_ERROR_INVALID_ARGUMENT);
+    TestRunningAppAnswer<std::int32_t>(sceLncUtilGetAppLaunchedUser, USER_SERVICE_INITIAL_USER_ID, Sentinel, LNC_UTIL_ERROR_INVALID_ARGUMENT, LNC_UTIL_ERROR_INVALID_ARGUMENT);
+    TestRunningAppAnswer<std::int32_t>(sceSystemServiceGetAppLaunchedUser, USER_SERVICE_INITIAL_USER_ID, Sentinel, LNC_UTIL_ERROR_INVALID_ARGUMENT, LNC_UTIL_ERROR_INVALID_ARGUMENT);
+    TestRunningAppAnswer<std::int32_t>(sceShellCoreUtilGetUserFocus, USER_SERVICE_INITIAL_USER_ID, Sentinel, SHELL_CORE_UTIL_ERROR_INVALID_ARGUMENT, LNC_UTIL_ERROR_INVALID_ARGUMENT);
 }
 
 void TestShellCoreUtilLeafCalls() {
@@ -163,9 +166,9 @@ void TestShellCoreUtilLeafCalls() {
 }
 
 void TestRunningAppState() {
-    TestRunningAppAnswer<bool>(sceLncUtilIsAppSuspended, false, true, LNC_UTIL_ERROR_INVALID_ARGUMENT);
-    TestRunningAppAnswer<bool>(sceSystemServiceIsAppSuspended, false, true, LNC_UTIL_ERROR_INVALID_ARGUMENT);
-    TestRunningAppAnswer<bool>(sceLncUtilIsSpeculativeLaunch, false, true, LNC_UTIL_ERROR_INVALID_ARGUMENT);
+    TestRunningAppAnswer<bool>(sceLncUtilIsAppSuspended, false, true, LNC_UTIL_ERROR_INVALID_ARGUMENT, LNC_UTIL_ERROR_INVALID_ARGUMENT);
+    TestRunningAppAnswer<bool>(sceSystemServiceIsAppSuspended, false, true, LNC_UTIL_ERROR_INVALID_ARGUMENT, LNC_UTIL_ERROR_INVALID_ARGUMENT);
+    TestRunningAppAnswer<bool>(sceLncUtilIsSpeculativeLaunch, false, true, LNC_UTIL_ERROR_INVALID_ARGUMENT, LNC_UTIL_ERROR_INVALID_ARGUMENT);
     errno = 71;
     Require(sceLncUtilIsSpeculativeLaunch(sceSystemServiceGetAppIdOfRunningBigApp(), reinterpret_cast<bool*>(0x10)) == LNC_UTIL_ERROR_INVALID_ARGUMENT);
     Require(errno == 71);
