@@ -286,6 +286,7 @@ IrProgram PrepareResourceProgram(const RecompileRequest& request, ShaderPreparat
     translateOptions.inputInfo = inputInfo;
     translateOptions.float32DenormPreserve = request.target.float32DenormPreserve;
     translateOptions.float64 = supports(spv::CapabilityFloat64);
+    translateOptions.coherentBufferAtomics = request.target.coherentBufferAtomics;
 
     constexpr InstructionTranslator translator;
 
@@ -884,6 +885,7 @@ CompiledVariant emitVariant(const RecompileRequest& request, IrProgram& program)
     targetOptions.float16WidenNans = request.target.float16WidenNans;
     targetOptions.float16NarrowNans = request.target.float16NarrowNans;
     targetOptions.meshInlineFunctions = request.target.meshInlineFunctions;
+    targetOptions.coherentBufferAtomics = request.target.coherentBufferAtomics;
 
     constexpr SpirvEmitter spirvEmitter;
     CompiledShaderArtifact result;

@@ -1297,6 +1297,8 @@ bool LayerReplaySafe(const IrProgram& program) {
                 case IrOpcode::SetVccHi:
                 case IrOpcode::SetM0:
                 case IrOpcode::Waitcnt:
+                case IrOpcode::GuestRelease:
+                case IrOpcode::GuestAcquire:
                 case IrOpcode::InstPrefetch:
                     break;
                 case IrOpcode::Sendmsg:
@@ -1366,6 +1368,8 @@ bool StencilReplaySafe(const IrProgram& program, bool lanesFixed) {
                 case IrOpcode::SetVccHi:
                 case IrOpcode::SetM0:
                 case IrOpcode::Waitcnt:
+                case IrOpcode::GuestRelease:
+                case IrOpcode::GuestAcquire:
                 case IrOpcode::InstPrefetch:
                     break;
                 case IrOpcode::Sendmsg:
