@@ -64,6 +64,8 @@
 #include "prx/libSceNKWebKit/include/HEVCCodecParameters.hpp"
 #include "prx/libSceNKWebKit/include/MimeExports.hpp"
 #include "prx/libSceNKWebKit/include/WtfValueExports.hpp"
+#include "prx/libSceNKWebKit/include/WtfAtomStringExports.hpp"
+#include "prx/libSceNKWebKit/include/WtfSymbolExports.hpp"
 #include "prx/libSceNKWebKit/include/RegionExports.hpp"
 #include "prx/libSceNKWebKit/include/UrlHelpers.hpp"
 #include "prx/libSceNKWebKit/include/URLDecompositionExports.hpp"
