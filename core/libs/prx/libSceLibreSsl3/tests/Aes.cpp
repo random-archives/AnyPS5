@@ -171,6 +171,7 @@ void TestNullArguments() {
     RequireInvalidArgument([&] { AES_unwrap_key_nid_postfix(&key, nullptr, out.data(), unreadable, 0x7ffffff8u); });
     Require(errno == 71 && Filled(out.data(), out.size(), 0xCC));
     Require(PeakKilobytes() - peakBefore < 64 * 1024);
+    Require(AES_unwrap_key_nid_postfix(&key, nullptr, out.data(), unreadable, 0xfffffff8u) == -1);
 }
 
 }
