@@ -1,8 +1,21 @@
 #pragma once
+#include <cstddef>
 #include <cstdint>
 #include <vector>
 
 namespace GuestSockets {
+
+struct LocalCredentials {
+    std::uint32_t version = 0;
+    std::uint32_t user = 0;
+    std::int16_t groupCount = 0;
+    std::uint16_t reserved = 0;
+    std::uint32_t groups[16]{};
+    std::uint32_t reservedTail = 0;
+    std::uint64_t unused = 0;
+};
+static_assert(sizeof(LocalCredentials) == 88);
+static_assert(offsetof(LocalCredentials, groups) == 12);
 
 struct SocketOptionState {
     int reportedError = 0;
@@ -39,6 +52,7 @@ int SetIpLevelOption(std::uintptr_t native, SocketOptionState& state, bool ipv4,
 int GetIpLevelOption(SocketOptionState& state, bool ipv4, bool datagram, int option, void* value, std::uint32_t* length);
 int SetIpv6LevelOption(std::uintptr_t native, bool ipv6, int option, const void* value, std::uint32_t length);
 int GetIpv6LevelOption(std::uintptr_t native, bool ipv6, int option, void* value, std::uint32_t* length);
+int GetLocalLevelOption(const LocalCredentials* credentials, bool stream, int option, void* value, std::uint32_t* length);
 
 }
 
